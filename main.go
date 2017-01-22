@@ -5,13 +5,14 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
-	"github.com/linki/armor-ingress-controller/controller"
 	"gopkg.in/alecthomas/kingpin.v2"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/pkg/labels"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/linki/armor-ingress-controller/controller"
 )
 
 const (
