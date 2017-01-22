@@ -1,0 +1,18 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: armor-controller
+  namespace: kube-system
+spec:
+  template:
+    metadata:
+      labels:
+        app: armor-controller
+    spec:
+      containers:
+      - name: armor-controller
+        image: quay.io/linki/armor-ingress-controller:latest
+        args:
+        - --in-cluster
+        - --interval=1m
+        imagePullPolicy: Always

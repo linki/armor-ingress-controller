@@ -1,0 +1,29 @@
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: armor
+  namespace: kube-system
+spec:
+  template:
+    metadata:
+      labels:
+        app: armor
+    spec:
+      containers:
+      - name: armor
+        image: labstack/armor:0.2.6
+        args:
+        - -c
+        - /etc/armor/armor.json
+        ports:
+        - containerPort: 80
+          hostPort: 80
+        - containerPort: 443
+          hostPort: 443
+        volumeMounts:
+        - name: armor-config
+          mountPath: /etc/armor
+      volumes:
+      - name: armor-config
+        configMap:
+          name: armor-config
