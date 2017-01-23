@@ -17,19 +17,30 @@ import (
 )
 
 const (
-	ingressClassAnnotationKey   = "kubernetes.io/ingress.class"
+	// the annotation to use when specifying the responsible ingress controller
+	// for an Ingress object. Commonly understood by other ingress controllers.
+	ingressClassAnnotationKey = "kubernetes.io/ingress.class"
+
+	// the value of the ingress class so that this controller feels responsible.
 	ingressClassAnnotationValue = "armor"
-	configHashAnnotationKey     = "armor.labstack.com/configHash"
+
+	// the annotation key to use when marking the armor deployment with the
+	// hash value of its current configuration. used to detect outdated pods.
+	configHashAnnotationKey = "armor.labstack.com/configHash"
 )
 
 type Controller struct {
+	// a kubernetes client object
 	Client kubernetes.Interface
 }
 
+// NewController instantiates a new controller.
 func NewController(client kubernetes.Interface) *Controller {
 	return &Controller{Client: client}
 }
 
+// GetIngresses returns a slice of all Ingress objects that are annotated with
+// this controller's annotation identifier.
 func (c *Controller) GetIngresses() ([]extensions.Ingress, error) {
 	ingressList, err := c.Client.Extensions().Ingresses(v1.NamespaceAll).List(v1.ListOptions{})
 	if err != nil {
@@ -47,6 +58,8 @@ func (c *Controller) GetIngresses() ([]extensions.Ingress, error) {
 	return ingresses, nil
 }
 
+// UpdateIngressLoadBalancers takes a slice of Ingress objects and updates the
+// Status.LoadBalancer section with the given IPs.
 func (c *Controller) UpdateIngressLoadBalancers(ingresses []extensions.Ingress, IPs ...string) error {
 	loadBalancers := make([]v1.LoadBalancerIngress, 0, len(IPs))
 
@@ -65,6 +78,9 @@ func (c *Controller) UpdateIngressLoadBalancers(ingresses []extensions.Ingress, 
 	return nil
 }
 
+// GenerateConfig receives a list of Ingress objects and generates a
+// corresponding Armor config from it. It also sets up some default plugins and
+// enables automatic TLS certificate retrieval from Let's Encrypt.
 func (c *Controller) GenerateConfig(ingresses ...extensions.Ingress) *armor.Armor {
 	config := &armor.Armor{
 		Hosts: make(map[string]*armor.Host),
@@ -113,6 +129,9 @@ func (c *Controller) GenerateConfig(ingresses ...extensions.Ingress) *armor.Armo
 	return config
 }
 
+// WriteConfigToConfigMapByName updates a ConfigMap identified by namespace and
+// name and stores the JSON representation of the passed in Armor config under
+// the provided key.
 func (c *Controller) WriteConfigToConfigMapByName(config *armor.Armor, namespace, configMapName, key string) error {
 	configMap, err := c.Client.Core().ConfigMaps(namespace).Get(configMapName)
 	if err != nil {
@@ -122,6 +141,9 @@ func (c *Controller) WriteConfigToConfigMapByName(config *armor.Armor, namespace
 	return c.WriteConfigToConfigMap(config, configMap, key)
 }
 
+// WriteConfigToConfigMap updates a passed in ConfigMap and stores the JSON
+// representation of the passed in Armor config under the provided key.
+// It also annotates the ConfigMap with the hash of its content.
 func (c *Controller) WriteConfigToConfigMap(config *armor.Armor, configMap *v1.ConfigMap, key string) error {
 	var buffer bytes.Buffer
 
@@ -146,10 +168,14 @@ func (c *Controller) WriteConfigToConfigMap(config *armor.Armor, configMap *v1.C
 	return nil
 }
 
+// WriteConfigToWriter writes the JSON representation of an Armor config to a
+// Writer.
 func (c *Controller) WriteConfigToWriter(config *armor.Armor, writer io.Writer) error {
 	return json.NewEncoder(writer).Encode(config)
 }
 
+// EnsureConfigMap creates a ConfigMap specified by namespace and name if it
+// doesn't already exist.
 func (c *Controller) EnsureConfigMap(namespace, configMapName string) error {
 	if _, err := c.Client.Core().ConfigMaps(namespace).Get(configMapName); err == nil {
 		return nil
@@ -169,6 +195,7 @@ func (c *Controller) EnsureConfigMap(namespace, configMapName string) error {
 	return nil
 }
 
+// UpdateDeploymentByName updates a Deployment identified by namespace and name.
 func (c *Controller) UpdateDeploymentByName(namespace string, deploymentName string, config *armor.Armor) error {
 	deployment, err := c.Client.Extensions().Deployments(namespace).Get(deploymentName)
 	if err != nil {
@@ -178,6 +205,10 @@ func (c *Controller) UpdateDeploymentByName(namespace string, deploymentName str
 	return c.UpdateDeployment(deployment, config)
 }
 
+// UpdateDeployment updates the passed in Deployment. It updates the annotation
+// in the Deployment as well as in the Pod template spec with the hash of the
+// passed in config so that the deployment controller will update the pods.
+//
 // TODO(linki): tests with different namespace don't fail ??
 func (c *Controller) UpdateDeployment(deployment *extensions.Deployment, config *armor.Armor) error {
 	configHash := getConfigHash(config)
@@ -201,6 +232,7 @@ func (c *Controller) UpdateDeployment(deployment *extensions.Deployment, config 
 	return nil
 }
 
+// UpdateDaemonSetByName updates a DaemonSet identified by namespace and name.
 func (c *Controller) UpdateDaemonSetByName(namespace string, daemonSetName string, config *armor.Armor) (*extensions.DaemonSet, error) {
 	daemonSet, err := c.Client.Extensions().DaemonSets(namespace).Get(daemonSetName)
 	if err != nil {
@@ -210,6 +242,11 @@ func (c *Controller) UpdateDaemonSetByName(namespace string, daemonSetName strin
 	return c.UpdateDaemonSet(daemonSet, config)
 }
 
+// UpdateDaemonSet updates the passed in DaemonSet. It updates the annotation
+// in the DaemonSet as well as in the Pod template spec with the hash of the
+// passed in config. This won't update any pods immediately but newly created
+// pods will correspond to the new template spec.
+//
 // TODO(linki): tests with different namespace don't fail ??
 // TODO(linki): pods do not get updated correctly
 func (c *Controller) UpdateDaemonSet(daemonSet *extensions.DaemonSet, config *armor.Armor) (*extensions.DaemonSet, error) {
@@ -235,6 +272,10 @@ func (c *Controller) UpdateDaemonSet(daemonSet *extensions.DaemonSet, config *ar
 	return daemonSet, nil
 }
 
+// UpdatePodsByLabelSelector deletes all pods matching a provided label selector
+// that are not annotated with the hash of the passed in config.
+// When passed the label selector of a DaemonSet this can be used to force the
+// pods to be updated.
 func (c *Controller) UpdatePodsByLabelSelector(namespace string, selector labels.Selector, config *armor.Armor) error {
 	configHash := getConfigHash(config)
 
@@ -256,6 +297,7 @@ func (c *Controller) UpdatePodsByLabelSelector(namespace string, selector labels
 	return nil
 }
 
+// GetNodeIPs returns the public IPs of all nodes in the cluster.
 func (c *Controller) GetNodeIPs() ([]string, error) {
 	nodeIPs := []string{}
 
@@ -275,6 +317,8 @@ func (c *Controller) GetNodeIPs() ([]string, error) {
 	return nodeIPs, nil
 }
 
+// getConfigHash returns the hash value of the passed in config.
+//
 // TODO(linki): don't panic on error here
 func getConfigHash(config *armor.Armor) string {
 	hash, err := hashstructure.Hash(config, nil)
@@ -285,6 +329,8 @@ func getConfigHash(config *armor.Armor) string {
 	return strconv.Itoa(int(hash))
 }
 
+// upstreamServiceURL returns the canonical internal DNS name for a service.
+//
 // TODO(linki): check if pointing to cluster service IP is better
 func upstreamServiceURL(namespace, name, port string) string {
 	return fmt.Sprintf("http://%s.%s.svc:%s", name, namespace, port)

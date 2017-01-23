@@ -16,19 +16,37 @@ import (
 )
 
 const (
-	namespace     = "kube-system"
+	// the namespace where armor and armor-controller run
+	namespace = "kube-system"
+
+	// the name of the ConfigMap used by armor, must live in `namespace`
 	configMapName = "armor-config"
-	configMapKey  = "armor.json"
+
+	// the name of the key to use inside the ConfigMap
+	configMapKey = "armor.json"
+
+	// the name of the DaemonSet runnign armor
 	daemonSetName = "armor"
-	version       = "unknown"
+
+	// the version of this tool
+	version = "unknown"
 )
 
 var (
+	// path to a kubeconfig file
 	kubeconfig string
-	inCluster  bool
-	interval   time.Duration
-	once       bool
-	debug      bool
+
+	// defines whether to find the cluster from the environment
+	inCluster bool
+
+	// the interval between synchronizations
+	interval time.Duration
+
+	// exit after first synchronization
+	once bool
+
+	// increase log output
+	debug bool
 )
 
 func init() {
@@ -55,39 +73,45 @@ func main() {
 	controller := controller.NewController(client)
 
 	for {
+		// get all Ingress objects.
 		ingresses, err := controller.GetIngresses()
 		if err != nil {
 			log.Fatal(err)
 		}
 
+		// generate an Armor config from the ingress list.
 		config := controller.GenerateConfig(ingresses...)
 
+		// create a ConfigMap for the Armor config if it doesn't exist.
 		if err = controller.EnsureConfigMap(namespace, configMapName); err != nil {
 			log.Fatal(err)
 		}
 
-		// controller.WriteConfigToWriter(config, os.Stdout)
-
+		// write the Armor config to the ConfigMap.
 		if err = controller.WriteConfigToConfigMapByName(config, namespace, configMapName, configMapKey); err != nil {
 			log.Fatal(err)
 		}
 
+		// Update the definition of the Armor DaemonSet.
 		daemonSet, err := controller.UpdateDaemonSetByName(namespace, daemonSetName, config)
 		if err != nil {
 			log.Fatal(err)
 		}
 
+		// Force all members of the DaemonSet to be recreated to apply the new config.
 		labelSet := labels.Set(daemonSet.Spec.Selector.MatchLabels)
 
 		if err = controller.UpdatePodsByLabelSelector(namespace, labelSet.AsSelector(), config); err != nil {
 			log.Fatal(err)
 		}
 
+		// Get the public IPs of all nodes.
 		ingressIPs, err := controller.GetNodeIPs()
 		if err != nil {
 			log.Fatal(err)
 		}
 
+		// Update all Ingress objects with the public IPs of all nodes.
 		if err := controller.UpdateIngressLoadBalancers(ingresses, ingressIPs...); err != nil {
 			log.Fatal(err)
 		}
@@ -103,6 +127,9 @@ func main() {
 	}
 }
 
+// newClient returns a kubernetes client that points to either the current
+// context's cluster in the configured kubeconfig file or to the cluster that
+// this binary runs in.
 func newClient() (*kubernetes.Clientset, error) {
 	var (
 		config *rest.Config
