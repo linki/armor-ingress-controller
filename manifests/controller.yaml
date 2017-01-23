@@ -11,8 +11,7 @@ spec:
     spec:
       containers:
       - name: armor-controller
-        image: quay.io/linki/armor-ingress-controller:latest
+        image: quay.io/linki/armor-ingress-controller:v0.1.0
         args:
         - --in-cluster
         - --interval=1m
-        imagePullPolicy: Always
