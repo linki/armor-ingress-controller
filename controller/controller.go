@@ -93,8 +93,8 @@ func (c *Controller) GenerateConfig(ingresses ...extensions.Ingress) *armor.Armo
 	}
 
 	config.Plugins = []armor.Plugin{
-		armor.Plugin{"name": "logger"},
-		armor.Plugin{"name": "https-redirect"},
+		{"name": "logger"},
+		{"name": "https-redirect"},
 	}
 
 	for _, ingress := range ingresses {

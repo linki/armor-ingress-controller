@@ -27,7 +27,7 @@ func TestNew(t *testing.T) {
 func TestGetIngresses(t *testing.T) {
 	fixtures := []*extensions.Ingress{
 		// main object under test
-		&extensions.Ingress{
+		{
 			ObjectMeta: v1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "foo",
@@ -38,7 +38,7 @@ func TestGetIngresses(t *testing.T) {
 		},
 
 		// supports multiple ingresses
-		&extensions.Ingress{
+		{
 			ObjectMeta: v1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "bar",
@@ -49,7 +49,7 @@ func TestGetIngresses(t *testing.T) {
 		},
 
 		// filtered out by annotation
-		&extensions.Ingress{
+		{
 			ObjectMeta: v1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "baz",
@@ -101,7 +101,7 @@ func TestGetIngresses(t *testing.T) {
 func TestUpdateIngressLoadBalancer(t *testing.T) {
 	fixtures := []extensions.Ingress{
 		// main object under test
-		extensions.Ingress{
+		{
 			ObjectMeta: v1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "foo",
@@ -109,7 +109,7 @@ func TestUpdateIngressLoadBalancer(t *testing.T) {
 		},
 
 		// supports multiple ingresses
-		extensions.Ingress{
+		{
 			ObjectMeta: v1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "bar",
@@ -187,26 +187,26 @@ func TestUpdateIngressLoadBalancer(t *testing.T) {
 func TestGenerateConfig(t *testing.T) {
 	fixtures := []extensions.Ingress{
 		// main object under test
-		extensions.Ingress{
+		{
 			ObjectMeta: v1.ObjectMeta{
 				Namespace: "armor",
 				Name:      "foo",
 			},
 			Spec: extensions.IngressSpec{
 				Rules: []extensions.IngressRule{
-					extensions.IngressRule{
+					{
 						Host: "foo.bar.com",
 						IngressRuleValue: extensions.IngressRuleValue{
 							HTTP: &extensions.HTTPIngressRuleValue{
 								Paths: []extensions.HTTPIngressPath{
-									extensions.HTTPIngressPath{
+									{
 										Backend: extensions.IngressBackend{
 											ServiceName: "bar",
 											ServicePort: intstr.FromInt(80),
 										},
 									},
 									// valid? needed? two targets
-									extensions.HTTPIngressPath{
+									{
 										Backend: extensions.IngressBackend{
 											ServiceName: "baz",
 											ServicePort: intstr.FromInt(8080),
@@ -217,12 +217,12 @@ func TestGenerateConfig(t *testing.T) {
 						},
 					},
 					// one target, otherwise ignored
-					extensions.IngressRule{
+					{
 						Host: "waldo.fred.com",
 						IngressRuleValue: extensions.IngressRuleValue{
 							HTTP: &extensions.HTTPIngressRuleValue{
 								Paths: []extensions.HTTPIngressPath{
-									extensions.HTTPIngressPath{
+									{
 										Backend: extensions.IngressBackend{
 											ServiceName: "waldo",
 											ServicePort: intstr.FromInt(9090),
@@ -233,7 +233,7 @@ func TestGenerateConfig(t *testing.T) {
 						},
 					},
 					// should not lead to nil pointer panic in controller code
-					extensions.IngressRule{
+					{
 						Host: "maybe.invalid",
 					},
 				},
@@ -241,19 +241,19 @@ func TestGenerateConfig(t *testing.T) {
 		},
 
 		// supports multiple ingresses
-		extensions.Ingress{
+		{
 			ObjectMeta: v1.ObjectMeta{
 				Namespace: "armor-2",
 				Name:      "qux",
 			},
 			Spec: extensions.IngressSpec{
 				Rules: []extensions.IngressRule{
-					extensions.IngressRule{
+					{
 						Host: "qux.quux.com",
 						IngressRuleValue: extensions.IngressRuleValue{
 							HTTP: &extensions.HTTPIngressRuleValue{
 								Paths: []extensions.HTTPIngressPath{
-									extensions.HTTPIngressPath{
+									{
 										Backend: extensions.IngressBackend{
 											ServiceName: "qux",
 											ServicePort: intstr.FromInt(443),
@@ -450,7 +450,7 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 
 	config := &armor.Armor{
 		Hosts: map[string]*armor.Host{
-			"foo": &armor.Host{
+			"foo": {
 				CertFile: "cert",
 			},
 		},
@@ -511,7 +511,7 @@ func TestWriteConfigToConfigMap(t *testing.T) {
 
 	config := &armor.Armor{
 		Hosts: map[string]*armor.Host{
-			"foo": &armor.Host{
+			"foo": {
 				CertFile: "cert",
 			},
 		},
@@ -550,7 +550,7 @@ func TestWriteConfigToConfigMap(t *testing.T) {
 func TestWriteConfigToWriter(t *testing.T) {
 	config := &armor.Armor{
 		Hosts: map[string]*armor.Host{
-			"foo": &armor.Host{
+			"foo": {
 				CertFile: "cert",
 			},
 		},
@@ -750,7 +750,7 @@ func TestUpdatePodsByLabelSelector(t *testing.T) {
 
 	fixtures := []*v1.Pod{
 		// should be removed
-		&v1.Pod{
+		{
 			ObjectMeta: v1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "foo",
@@ -759,7 +759,7 @@ func TestUpdatePodsByLabelSelector(t *testing.T) {
 		},
 
 		// should not be removed: different namespace
-		&v1.Pod{
+		{
 			ObjectMeta: v1.ObjectMeta{
 				Namespace: "armor",
 				Name:      "bar",
@@ -768,7 +768,7 @@ func TestUpdatePodsByLabelSelector(t *testing.T) {
 		},
 
 		// should not be removed: doesn't match labels
-		&v1.Pod{
+		{
 			ObjectMeta: v1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "qux",
@@ -776,7 +776,7 @@ func TestUpdatePodsByLabelSelector(t *testing.T) {
 		},
 
 		// should not be removed: config up to date
-		&v1.Pod{
+		{
 			ObjectMeta: v1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "waldo",
@@ -831,11 +831,11 @@ func TestGetNodeIPs(t *testing.T) {
 		},
 		Status: v1.NodeStatus{
 			Addresses: []v1.NodeAddress{
-				v1.NodeAddress{
+				{
 					Type:    v1.NodeExternalIP,
 					Address: "54.10.11.12",
 				},
-				v1.NodeAddress{
+				{
 					Type:    v1.NodeInternalIP,
 					Address: "10.0.1.1",
 				},
@@ -869,7 +869,7 @@ func TestGetNodeIPs(t *testing.T) {
 func TestGetConfigHash(t *testing.T) {
 	config := &armor.Armor{
 		Hosts: map[string]*armor.Host{
-			"foo": &armor.Host{
+			"foo": {
 				CertFile: "cert",
 			},
 		},
@@ -877,7 +877,7 @@ func TestGetConfigHash(t *testing.T) {
 
 	otherConfig := &armor.Armor{
 		Hosts: map[string]*armor.Host{
-			"foo": &armor.Host{
+			"foo": {
 				CertFile: "other-cert",
 			},
 		},
