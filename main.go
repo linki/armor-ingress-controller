@@ -70,7 +70,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	controller := controller.NewController(client)
+	controller := controller.NewController(client, nil)
 
 	for {
 		// get all Ingress objects.

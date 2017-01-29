@@ -3,9 +3,12 @@ package controller
 import (
 	"bytes"
 	"encoding/json"
+	"log"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/Sirupsen/logrus"
 	"github.com/labstack/armor"
 
 	"k8s.io/client-go/kubernetes/fake"
@@ -17,10 +20,21 @@ import (
 
 func TestNew(t *testing.T) {
 	client := fake.NewSimpleClientset()
-	controller := NewController(client)
+	controller := NewController(client, nil)
 
 	if controller.Client != client {
 		t.Errorf("expected %#v, got %#v", client, controller.Client)
+	}
+
+	if controller.Logger != logrus.StandardLogger() {
+		t.Errorf("expected %#v, got %#v", logrus.StandardLogger(), controller.Logger)
+	}
+
+	logger := log.New(os.Stderr, "", log.LstdFlags)
+	controller = NewController(client, logger)
+
+	if controller.Logger != logger {
+		t.Errorf("expected %#v, got %#v", logger, controller.Logger)
 	}
 }
 
@@ -65,7 +79,10 @@ func TestGetIngresses(t *testing.T) {
 		}
 	}
 
-	controller := NewController(client)
+	output := &bytes.Buffer{}
+	logger := log.New(output, "", 0)
+
+	controller := NewController(client, logger)
 
 	ingresses, err := controller.GetIngresses()
 	if err != nil {
@@ -74,6 +91,11 @@ func TestGetIngresses(t *testing.T) {
 
 	if len(ingresses) != 2 {
 		t.Fatalf("expected 2, got %d", len(ingresses))
+	}
+
+	expected := "Found 2 ingress(es)"
+	if !strings.Contains(output.String(), expected) {
+		t.Errorf("expected %s in %s", expected, output.String())
 	}
 
 	// TODO(linki): make tests independent of ordering
@@ -125,7 +147,7 @@ func TestUpdateIngressLoadBalancer(t *testing.T) {
 		}
 	}
 
-	controller := NewController(client)
+	controller := NewController(client, nil)
 
 	if err := controller.UpdateIngressLoadBalancers(fixtures, "8.8.8.8", "8.8.4.4"); err != nil {
 		t.Error(err)
@@ -307,7 +329,10 @@ func TestGenerateConfig(t *testing.T) {
 		}
 	}
 
-	controller := NewController(client)
+	output := &bytes.Buffer{}
+	logger := log.New(output, "", 0)
+
+	controller := NewController(client, logger)
 
 	config, err := controller.GenerateConfig(fixtures...)
 	if err != nil {
@@ -316,6 +341,11 @@ func TestGenerateConfig(t *testing.T) {
 
 	if len(config.Hosts) != 3 {
 		t.Fatalf("expected 3, got %d", len(config.Hosts))
+	}
+
+	expected := "Can't find service 'armor/waldo' for ingress 'armor/foo'"
+	if !strings.Contains(output.String(), expected) {
+		t.Errorf("expected %s in %s", expected, output.String())
 	}
 
 	if _, exists := config.Hosts["foo.bar.com"]; !exists {
@@ -358,7 +388,7 @@ func TestGenerateConfig(t *testing.T) {
 		t.Fatalf("expected 2, got %d", len(targets))
 	}
 
-	expected := "http://8.8.8.8:80"
+	expected = "http://8.8.8.8:80"
 
 	// TODO(linki): make tests independent of ordering
 	if targets[0]["url"] != expected {
@@ -409,7 +439,7 @@ func TestGenerateConfig(t *testing.T) {
 }
 
 func TestIncludeGlobalPlugins(t *testing.T) {
-	controller := NewController(fake.NewSimpleClientset())
+	controller := NewController(fake.NewSimpleClientset(), nil)
 
 	config, err := controller.GenerateConfig(extensions.Ingress{})
 	if err != nil {
@@ -443,7 +473,7 @@ func TestIncludeGlobalPlugins(t *testing.T) {
 }
 
 func TestSetupAutoTLS(t *testing.T) {
-	controller := NewController(fake.NewSimpleClientset())
+	controller := NewController(fake.NewSimpleClientset(), nil)
 
 	config, err := controller.GenerateConfig(extensions.Ingress{})
 	if err != nil {
@@ -469,7 +499,7 @@ func TestSetupAutoTLS(t *testing.T) {
 
 func TestEnsureConfigMap(t *testing.T) {
 	client := fake.NewSimpleClientset()
-	controller := NewController(client)
+	controller := NewController(client, nil)
 
 	if err := controller.EnsureConfigMap("armor-test", "foo"); err != nil {
 		t.Fatal(err)
@@ -506,7 +536,7 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 		},
 	}
 
-	controller := NewController(client)
+	controller := NewController(client, nil)
 
 	if err := controller.WriteConfigToConfigMapByName(config, "armor-test", "foo", "bar"); err != nil {
 		t.Fatal(err)
@@ -567,7 +597,7 @@ func TestWriteConfigToConfigMap(t *testing.T) {
 		},
 	}
 
-	controller := NewController(client)
+	controller := NewController(client, nil)
 
 	if err := controller.WriteConfigToConfigMap(config, configMap, "bar"); err != nil {
 		t.Fatal(err)
@@ -606,7 +636,7 @@ func TestWriteConfigToWriter(t *testing.T) {
 		},
 	}
 
-	controller := NewController(fake.NewSimpleClientset())
+	controller := NewController(fake.NewSimpleClientset(), nil)
 
 	var buffer bytes.Buffer
 
@@ -647,7 +677,7 @@ func TestUpdateDeploymentByName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	controller := NewController(client)
+	controller := NewController(client, nil)
 	config := &armor.Armor{}
 
 	if err := controller.UpdateDeploymentByName("armor-test", "foo", config); err != nil {
@@ -686,7 +716,7 @@ func TestUpdateDeployment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	controller := NewController(client)
+	controller := NewController(client, nil)
 	config := &armor.Armor{}
 
 	if err := controller.UpdateDeployment(deployment, config); err != nil {
@@ -725,7 +755,7 @@ func TestUpdateDaemonSetByName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	controller := NewController(client)
+	controller := NewController(client, nil)
 	config := &armor.Armor{}
 
 	daemonSet, err := controller.UpdateDaemonSetByName("armor-test", "foo", config)
@@ -765,7 +795,7 @@ func TestUpdateDaemonSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	controller := NewController(client)
+	controller := NewController(client, nil)
 	config := &armor.Armor{}
 
 	daemonSet, err := controller.UpdateDaemonSet(daemonSet, config)
@@ -846,7 +876,7 @@ func TestUpdatePodsByLabelSelector(t *testing.T) {
 		}
 	}
 
-	controller := NewController(client)
+	controller := NewController(client, nil)
 
 	if err := controller.UpdatePodsByLabelSelector("armor-test", labels.SelectorFromSet(labelSet), config); err != nil {
 		t.Fatal(err)
@@ -899,7 +929,7 @@ func TestGetNodeIPs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	controller := NewController(client)
+	controller := NewController(client, nil)
 
 	nodeIPs, err := controller.GetNodeIPs()
 

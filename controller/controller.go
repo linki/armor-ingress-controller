@@ -34,11 +34,17 @@ const (
 type Controller struct {
 	// a kubernetes client object
 	Client kubernetes.Interface
+	// the logger object to use
+	Logger log.StdLogger
 }
 
 // NewController instantiates a new controller.
-func NewController(client kubernetes.Interface) *Controller {
-	return &Controller{Client: client}
+func NewController(client kubernetes.Interface, logger log.StdLogger) *Controller {
+	if logger == nil {
+		logger = log.StandardLogger()
+	}
+
+	return &Controller{Client: client, Logger: logger}
 }
 
 // GetIngresses returns a slice of all Ingress objects that are annotated with
@@ -56,6 +62,8 @@ func (c *Controller) GetIngresses() ([]extensions.Ingress, error) {
 			ingresses = append(ingresses, ingress)
 		}
 	}
+
+	c.Logger.Printf("Found %d ingress(es)", len(ingresses))
 
 	return ingresses, nil
 }
@@ -112,7 +120,7 @@ func (c *Controller) GenerateConfig(ingresses ...extensions.Ingress) (*armor.Arm
 				service, err := c.Client.Core().Services(ingress.Namespace).Get(path.Backend.ServiceName)
 				if err != nil {
 					if errors.IsNotFound(err) {
-						log.Errorf("Can't find service '%s/%s' for ingress '%s/%s'",
+						c.Logger.Printf("Can't find service '%s/%s' for ingress '%s/%s'",
 							ingress.Namespace, path.Backend.ServiceName, ingress.Namespace, ingress.Name)
 						continue
 					}
