@@ -7,10 +7,12 @@ import (
 	"io"
 	"strconv"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/labstack/armor"
 	"github.com/mitchellh/hashstructure"
 
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/pkg/api/errors"
 	"k8s.io/client-go/pkg/api/v1"
 	extensions "k8s.io/client-go/pkg/apis/extensions/v1beta1"
 	"k8s.io/client-go/pkg/labels"
@@ -81,7 +83,7 @@ func (c *Controller) UpdateIngressLoadBalancers(ingresses []extensions.Ingress, 
 // GenerateConfig receives a list of Ingress objects and generates a
 // corresponding Armor config from it. It also sets up some default plugins and
 // enables automatic TLS certificate retrieval from Let's Encrypt.
-func (c *Controller) GenerateConfig(ingresses ...extensions.Ingress) *armor.Armor {
+func (c *Controller) GenerateConfig(ingresses ...extensions.Ingress) (*armor.Armor, error) {
 	config := &armor.Armor{
 		Hosts: make(map[string]*armor.Host),
 	}
@@ -107,9 +109,19 @@ func (c *Controller) GenerateConfig(ingresses ...extensions.Ingress) *armor.Armo
 			targets := make([]map[string]string, 0, len(rule.HTTP.Paths))
 
 			for _, path := range rule.HTTP.Paths {
+				service, err := c.Client.Core().Services(ingress.Namespace).Get(path.Backend.ServiceName)
+				if err != nil {
+					if errors.IsNotFound(err) {
+						log.Errorf("Can't find service '%s/%s' for ingress '%s/%s'",
+							ingress.Namespace, path.Backend.ServiceName, ingress.Namespace, ingress.Name)
+						continue
+					}
+
+					return nil, err
+				}
+
 				target := map[string]string{
-					"url": upstreamServiceURL(ingress.Namespace,
-						path.Backend.ServiceName, path.Backend.ServicePort.String()),
+					"url": upstreamServiceURL(service.Spec.ClusterIP, path.Backend.ServicePort.String()),
 				}
 
 				targets = append(targets, target)
@@ -126,7 +138,7 @@ func (c *Controller) GenerateConfig(ingresses ...extensions.Ingress) *armor.Armo
 		}
 	}
 
-	return config
+	return config, nil
 }
 
 // WriteConfigToConfigMapByName updates a ConfigMap identified by namespace and
@@ -329,9 +341,7 @@ func getConfigHash(config *armor.Armor) string {
 	return strconv.Itoa(int(hash))
 }
 
-// upstreamServiceURL returns the canonical internal DNS name for a service.
-//
-// TODO(linki): check if pointing to cluster service IP is better
-func upstreamServiceURL(namespace, name, port string) string {
-	return fmt.Sprintf("http://%s.%s.svc:%s", name, namespace, port)
+// upstreamServiceURL returns an http URL given an IP and port.
+func upstreamServiceURL(ip, port string) string {
+	return fmt.Sprintf("http://%s:%s", ip, port)
 }

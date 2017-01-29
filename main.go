@@ -80,7 +80,10 @@ func main() {
 		}
 
 		// generate an Armor config from the ingress list.
-		config := controller.GenerateConfig(ingresses...)
+		config, err := controller.GenerateConfig(ingresses...)
+		if err != nil {
+			log.Fatal(err)
+		}
 
 		// create a ConfigMap for the Armor config if it doesn't exist.
 		if err = controller.EnsureConfigMap(namespace, configMapName); err != nil {

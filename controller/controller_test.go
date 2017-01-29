@@ -216,7 +216,7 @@ func TestGenerateConfig(t *testing.T) {
 							},
 						},
 					},
-					// one target, otherwise ignored
+					// one target, otherwise ignored, can't find service
 					{
 						Host: "waldo.fred.com",
 						IngressRuleValue: extensions.IngressRuleValue{
@@ -268,9 +268,51 @@ func TestGenerateConfig(t *testing.T) {
 		},
 	}
 
-	controller := NewController(fake.NewSimpleClientset())
+	services := []v1.Service{
+		{
+			ObjectMeta: v1.ObjectMeta{
+				Namespace: "armor",
+				Name:      "bar",
+			},
+			Spec: v1.ServiceSpec{
+				ClusterIP: "8.8.8.8",
+			},
+		},
+		{
+			ObjectMeta: v1.ObjectMeta{
+				Namespace: "armor",
+				Name:      "baz",
+			},
+			Spec: v1.ServiceSpec{
+				ClusterIP: "8.8.4.4",
+			},
+		},
+		// different namespace
+		{
+			ObjectMeta: v1.ObjectMeta{
+				Namespace: "armor-2",
+				Name:      "qux",
+			},
+			Spec: v1.ServiceSpec{
+				ClusterIP: "1.2.3.4",
+			},
+		},
+	}
 
-	config := controller.GenerateConfig(fixtures...)
+	client := fake.NewSimpleClientset()
+
+	for _, service := range services {
+		if _, err := client.Core().Services(service.Namespace).Create(&service); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	controller := NewController(client)
+
+	config, err := controller.GenerateConfig(fixtures...)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(config.Hosts) != 3 {
 		t.Fatalf("expected 3, got %d", len(config.Hosts))
@@ -316,14 +358,14 @@ func TestGenerateConfig(t *testing.T) {
 		t.Fatalf("expected 2, got %d", len(targets))
 	}
 
-	expected := "http://bar.armor.svc:80"
+	expected := "http://8.8.8.8:80"
 
 	// TODO(linki): make tests independent of ordering
 	if targets[0]["url"] != expected {
 		t.Fatalf("expected %s, got %#v", expected, targets[0]["url"])
 	}
 
-	expected = "http://baz.armor.svc:8080"
+	expected = "http://8.8.4.4:8080"
 
 	if targets[1]["url"] != expected {
 		t.Fatalf("expected %s, got %#v", expected, targets[0]["url"])
@@ -359,7 +401,7 @@ func TestGenerateConfig(t *testing.T) {
 		t.Fatalf("expected 1, got %d", len(targets))
 	}
 
-	expected = "http://qux.armor-2.svc:443"
+	expected = "http://1.2.3.4:443"
 
 	if targets[0]["url"] != expected {
 		t.Fatalf("expected %s, got %#v", expected, targets[0]["url"])
@@ -368,7 +410,11 @@ func TestGenerateConfig(t *testing.T) {
 
 func TestIncludeGlobalPlugins(t *testing.T) {
 	controller := NewController(fake.NewSimpleClientset())
-	config := controller.GenerateConfig(extensions.Ingress{})
+
+	config, err := controller.GenerateConfig(extensions.Ingress{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(config.Plugins) != 2 {
 		t.Fatalf("expected 2, got %d", len(config.Plugins))
@@ -398,7 +444,11 @@ func TestIncludeGlobalPlugins(t *testing.T) {
 
 func TestSetupAutoTLS(t *testing.T) {
 	controller := NewController(fake.NewSimpleClientset())
-	config := controller.GenerateConfig(extensions.Ingress{})
+
+	config, err := controller.GenerateConfig(extensions.Ingress{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if config.TLS == nil {
 		t.Fatalf("TLS not configured.")
@@ -894,15 +944,14 @@ func TestGetConfigHash(t *testing.T) {
 
 func TestUpstreamServiceURL(t *testing.T) {
 	for _, test := range []struct {
-		namespace, name, port, want string
+		ip, port, want string
 	}{
-		{"default", "foo", "80", "http://foo.default.svc:80"},
-		{"default", "bar", "8080", "http://bar.default.svc:8080"},
-		{"armor", "foo", "443", "http://foo.armor.svc:443"},
+		{"8.8.8.8", "80", "http://8.8.8.8:80"},
+		{"1.2.3.4", "8080", "http://1.2.3.4:8080"},
 	} {
-		got := upstreamServiceURL(test.namespace, test.name, test.port)
+		got := upstreamServiceURL(test.ip, test.port)
 		if got != test.want {
-			t.Errorf("upstreamServiceURL(%q, %q, %q) => %q, want %q", test.namespace, test.name, test.port, got, test.want)
+			t.Errorf("upstreamServiceURL(%q, %q) => %q, want %q", test.ip, test.port, got, test.want)
 		}
 	}
 }
