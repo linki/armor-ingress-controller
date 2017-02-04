@@ -11,7 +11,7 @@ type (
 	// by an HTTP handler to construct an HTTP response.
 	// See: https://golang.org/pkg/net/http/#ResponseWriter
 	Response struct {
-		Writer    http.ResponseWriter
+		writer    http.ResponseWriter
 		Status    int
 		Size      int64
 		Committed bool
@@ -21,7 +21,17 @@ type (
 
 // NewResponse creates a new instance of Response.
 func NewResponse(w http.ResponseWriter, e *Echo) (r *Response) {
-	return &Response{Writer: w, echo: e}
+	return &Response{writer: w, echo: e}
+}
+
+// SetWriter sets the http.ResponseWriter instance for this Response.
+func (r *Response) SetWriter(w http.ResponseWriter) {
+	r.writer = w
+}
+
+// Writer returns the http.ResponseWriter instance for this Response.
+func (r *Response) Writer() http.ResponseWriter {
+	return r.writer
 }
 
 // Header returns the header map for the writer that will be sent by
@@ -31,7 +41,7 @@ func NewResponse(w http.ResponseWriter, e *Echo) (r *Response) {
 // To suppress implicit response headers, set their value to nil.
 // Example: https://golang.org/pkg/net/http/#example_ResponseWriter_trailers
 func (r *Response) Header() http.Header {
-	return r.Writer.Header()
+	return r.writer.Header()
 }
 
 // WriteHeader sends an HTTP response header with status code. If WriteHeader is
@@ -44,7 +54,7 @@ func (r *Response) WriteHeader(code int) {
 		return
 	}
 	r.Status = code
-	r.Writer.WriteHeader(code)
+	r.writer.WriteHeader(code)
 	r.Committed = true
 }
 
@@ -53,7 +63,7 @@ func (r *Response) Write(b []byte) (n int, err error) {
 	if !r.Committed {
 		r.WriteHeader(http.StatusOK)
 	}
-	n, err = r.Writer.Write(b)
+	n, err = r.writer.Write(b)
 	r.Size += int64(n)
 	return
 }
@@ -62,14 +72,14 @@ func (r *Response) Write(b []byte) (n int, err error) {
 // buffered data to the client.
 // See [http.Flusher](https://golang.org/pkg/net/http/#Flusher)
 func (r *Response) Flush() {
-	r.Writer.(http.Flusher).Flush()
+	r.writer.(http.Flusher).Flush()
 }
 
 // Hijack implements the http.Hijacker interface to allow an HTTP handler to
 // take over the connection.
 // See [http.Hijacker](https://golang.org/pkg/net/http/#Hijacker)
 func (r *Response) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return r.Writer.(http.Hijacker).Hijack()
+	return r.writer.(http.Hijacker).Hijack()
 }
 
 // CloseNotify implements the http.CloseNotifier interface to allow detecting
@@ -78,11 +88,11 @@ func (r *Response) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // client has disconnected before the response is ready.
 // See [http.CloseNotifier](https://golang.org/pkg/net/http/#CloseNotifier)
 func (r *Response) CloseNotify() <-chan bool {
-	return r.Writer.(http.CloseNotifier).CloseNotify()
+	return r.writer.(http.CloseNotifier).CloseNotify()
 }
 
 func (r *Response) reset(w http.ResponseWriter) {
-	r.Writer = w
+	r.writer = w
 	r.Size = 0
 	r.Status = http.StatusOK
 	r.Committed = false

@@ -23,9 +23,9 @@ type (
 		Request() *http.Request
 
 		// SetRequest sets `*http.Request`.
-		SetRequest(r *http.Request)
+		SetRequest(*http.Request)
 
-		// Response returns `*Response`.
+		// Request returns `*Response`.
 		Response() *Response
 
 		// IsTLS returns true if HTTP connection is TLS otherwise false.
@@ -42,25 +42,25 @@ type (
 		Path() string
 
 		// SetPath sets the registered path for the handler.
-		SetPath(p string)
+		SetPath(string)
 
 		// Param returns path parameter by name.
-		Param(name string) string
+		Param(string) string
 
 		// ParamNames returns path parameter names.
 		ParamNames() []string
 
 		// SetParamNames sets path parameter names.
-		SetParamNames(names ...string)
+		SetParamNames(...string)
 
 		// ParamValues returns path parameter values.
 		ParamValues() []string
 
 		// SetParamValues sets path parameter values.
-		SetParamValues(values ...string)
+		SetParamValues(...string)
 
 		// QueryParam returns the query param for the provided name.
-		QueryParam(name string) string
+		QueryParam(string) string
 
 		// QueryParams returns the query parameters as `url.Values`.
 		QueryParams() url.Values
@@ -69,100 +69,87 @@ type (
 		QueryString() string
 
 		// FormValue returns the form field value for the provided name.
-		FormValue(name string) string
+		FormValue(string) string
 
 		// FormParams returns the form parameters as `url.Values`.
 		FormParams() (url.Values, error)
 
 		// FormFile returns the multipart form file for the provided name.
-		FormFile(name string) (*multipart.FileHeader, error)
+		FormFile(string) (*multipart.FileHeader, error)
 
 		// MultipartForm returns the multipart form.
 		MultipartForm() (*multipart.Form, error)
 
 		// Cookie returns the named cookie provided in the request.
-		Cookie(name string) (*http.Cookie, error)
+		Cookie(string) (*http.Cookie, error)
 
 		// SetCookie adds a `Set-Cookie` header in HTTP response.
-		SetCookie(cookie *http.Cookie)
+		SetCookie(*http.Cookie)
 
 		// Cookies returns the HTTP cookies sent with the request.
 		Cookies() []*http.Cookie
 
 		// Get retrieves data from the context.
-		Get(key string) interface{}
+		Get(string) interface{}
 
 		// Set saves data in the context.
-		Set(key string, val interface{})
+		Set(string, interface{})
 
 		// Bind binds the request body into provided type `i`. The default binder
 		// does it based on Content-Type header.
-		Bind(i interface{}) error
-
-		// Validate validates provided `i`. It is usually called after `Context#Bind()`.
-		// Validator must be registered using `Echo#Validator`.
-		Validate(i interface{}) error
+		Bind(interface{}) error
 
 		// Render renders a template with data and sends a text/html response with status
-		// code. Renderer must be registered using `Echo.Renderer`.
-		Render(code int, name string, data interface{}) error
+		// code. Templates can be registered using `Echo.Renderer`.
+		Render(int, string, interface{}) error
 
 		// HTML sends an HTTP response with status code.
-		HTML(code int, html string) error
-
-		// HTMLBlob sends an HTTP blob response with status code.
-		HTMLBlob(code int, b []byte) error
+		HTML(int, string) error
 
 		// String sends a string response with status code.
-		String(code int, s string) error
+		String(int, string) error
 
 		// JSON sends a JSON response with status code.
-		JSON(code int, i interface{}) error
-
-		// JSONPretty sends a pretty-print JSON with status code.
-		JSONPretty(code int, i interface{}, indent string) error
+		JSON(int, interface{}) error
 
 		// JSONBlob sends a JSON blob response with status code.
-		JSONBlob(code int, b []byte) error
+		JSONBlob(int, []byte) error
 
 		// JSONP sends a JSONP response with status code. It uses `callback` to construct
 		// the JSONP payload.
-		JSONP(code int, callback string, i interface{}) error
+		JSONP(int, string, interface{}) error
 
 		// JSONPBlob sends a JSONP blob response with status code. It uses `callback`
 		// to construct the JSONP payload.
-		JSONPBlob(code int, callback string, b []byte) error
+		JSONPBlob(int, string, []byte) error
 
 		// XML sends an XML response with status code.
-		XML(code int, i interface{}) error
+		XML(int, interface{}) error
 
-		// XMLPretty sends a pretty-print XML with status code.
-		XMLPretty(code int, i interface{}, indent string) error
-
-		// XMLBlob sends an XML blob response with status code.
-		XMLBlob(code int, b []byte) error
+		// XMLBlob sends a XML blob response with status code.
+		XMLBlob(int, []byte) error
 
 		// Blob sends a blob response with status code and content type.
-		Blob(code int, contentType string, b []byte) error
+		Blob(int, string, []byte) error
 
 		// Stream sends a streaming response with status code and content type.
-		Stream(code int, contentType string, r io.Reader) error
+		Stream(int, string, io.Reader) error
 
 		// File sends a response with the content of the file.
-		File(file string) error
+		File(string) error
 
 		// Attachment sends a response as attachment, prompting client to save the
 		// file.
-		Attachment(file string, name string) error
+		Attachment(string, string) error
 
 		// Inline sends a response as inline, opening the file in the browser.
-		Inline(file string, name string) error
+		Inline(string, string) error
 
 		// NoContent sends a response with no body and a status code.
-		NoContent(code int) error
+		NoContent(int) error
 
-		// Redirect redirects the request to a provided URL with status code.
-		Redirect(code int, url string) error
+		// Redirect redirects the request with status code.
+		Redirect(int, string) error
 
 		// Error invokes the registered HTTP error handler. Generally used by middleware.
 		Error(err error)
@@ -171,7 +158,7 @@ type (
 		Handler() HandlerFunc
 
 		// SetHandler sets the matched handler by router.
-		SetHandler(h HandlerFunc)
+		SetHandler(HandlerFunc)
 
 		// Logger returns the `Logger` instance.
 		Logger() Logger
@@ -182,7 +169,7 @@ type (
 		// Reset resets the context after request completes. It must be called along
 		// with `Echo#AcquireContext()` and `Echo#ReleaseContext()`.
 		// See `Echo#ServeHTTP()`
-		Reset(r *http.Request, w http.ResponseWriter)
+		Reset(*http.Request, http.ResponseWriter)
 	}
 
 	context struct {
@@ -339,10 +326,6 @@ func (c *context) Cookies() []*http.Cookie {
 	return c.request.Cookies()
 }
 
-func (c *context) Get(key string) interface{} {
-	return c.store[key]
-}
-
 func (c *context) Set(key string, val interface{}) {
 	if c.store == nil {
 		c.store = make(Map)
@@ -350,15 +333,12 @@ func (c *context) Set(key string, val interface{}) {
 	c.store[key] = val
 }
 
-func (c *context) Bind(i interface{}) error {
-	return c.echo.Binder.Bind(i, c)
+func (c *context) Get(key string) interface{} {
+	return c.store[key]
 }
 
-func (c *context) Validate(i interface{}) error {
-	if c.echo.Validator == nil {
-		return ErrValidatorNotRegistered
-	}
-	return c.echo.Validator.Validate(i)
+func (c *context) Bind(i interface{}) error {
+	return c.echo.Binder.Bind(i, c)
 }
 
 func (c *context) Render(code int, name string, data interface{}) (err error) {
@@ -369,36 +349,33 @@ func (c *context) Render(code int, name string, data interface{}) (err error) {
 	if err = c.echo.Renderer.Render(buf, name, data, c); err != nil {
 		return
 	}
-	return c.HTMLBlob(code, buf.Bytes())
+	c.response.Header().Set(HeaderContentType, MIMETextHTMLCharsetUTF8)
+	c.response.WriteHeader(code)
+	_, err = c.response.Write(buf.Bytes())
+	return
 }
 
 func (c *context) HTML(code int, html string) (err error) {
-	return c.HTMLBlob(code, []byte(html))
-}
-
-func (c *context) HTMLBlob(code int, b []byte) (err error) {
-	return c.Blob(code, MIMETextHTMLCharsetUTF8, b)
+	c.response.Header().Set(HeaderContentType, MIMETextHTMLCharsetUTF8)
+	c.response.WriteHeader(code)
+	_, err = c.response.Write([]byte(html))
+	return
 }
 
 func (c *context) String(code int, s string) (err error) {
-	return c.Blob(code, MIMETextPlainCharsetUTF8, []byte(s))
+	c.response.Header().Set(HeaderContentType, MIMETextPlainCharsetUTF8)
+	c.response.WriteHeader(code)
+	_, err = c.response.Write([]byte(s))
+	return
 }
 
 func (c *context) JSON(code int, i interface{}) (err error) {
-	if c.echo.Debug {
-		return c.JSONPretty(code, i, "  ")
-	}
 	b, err := json.Marshal(i)
-	if err != nil {
-		return
+	if c.echo.Debug {
+		b, err = json.MarshalIndent(i, "", "  ")
 	}
-	return c.JSONBlob(code, b)
-}
-
-func (c *context) JSONPretty(code int, i interface{}, indent string) (err error) {
-	b, err := json.MarshalIndent(i, "", indent)
 	if err != nil {
-		return
+		return err
 	}
 	return c.JSONBlob(code, b)
 }
@@ -410,7 +387,7 @@ func (c *context) JSONBlob(code int, b []byte) (err error) {
 func (c *context) JSONP(code int, callback string, i interface{}) (err error) {
 	b, err := json.Marshal(i)
 	if err != nil {
-		return
+		return err
 	}
 	return c.JSONPBlob(code, callback, b)
 }
@@ -429,20 +406,12 @@ func (c *context) JSONPBlob(code int, callback string, b []byte) (err error) {
 }
 
 func (c *context) XML(code int, i interface{}) (err error) {
-	if c.echo.Debug {
-		return c.XMLPretty(code, i, "  ")
-	}
 	b, err := xml.Marshal(i)
-	if err != nil {
-		return
+	if c.echo.Debug {
+		b, err = xml.MarshalIndent(i, "", "  ")
 	}
-	return c.XMLBlob(code, b)
-}
-
-func (c *context) XMLPretty(code int, i interface{}, indent string) (err error) {
-	b, err := xml.MarshalIndent(i, "", indent)
 	if err != nil {
-		return
+		return err
 	}
 	return c.XMLBlob(code, b)
 }
