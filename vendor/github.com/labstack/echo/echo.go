@@ -42,8 +42,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	slog "log"
-	"net"
+	"log"
 	"net/http"
 	"path"
 	"reflect"
@@ -52,33 +51,31 @@ import (
 	"time"
 
 	"github.com/labstack/gommon/color"
-	"github.com/labstack/gommon/log"
+	glog "github.com/labstack/gommon/log"
+	"github.com/tylerb/graceful"
 	"golang.org/x/crypto/acme/autocert"
 )
 
 type (
 	// Echo is the top-level framework instance.
 	Echo struct {
-		Server           *http.Server
-		TLSServer        *http.Server
-		Listener         net.Listener
-		TLSListener      net.Listener
-		DisableHTTP2     bool
-		Debug            bool
-		HTTPErrorHandler HTTPErrorHandler
-		Binder           Binder
-		Validator        Validator
-		Renderer         Renderer
-		AutoTLSManager   autocert.Manager
-		Logger           Logger
-		stdLogger        *slog.Logger
-		colorer          *color.Color
-		premiddleware    []MiddlewareFunc
-		middleware       []MiddlewareFunc
-		maxParam         *int
-		router           *Router
-		notFoundHandler  HandlerFunc
-		pool             sync.Pool
+		DisableHTTP2 bool
+		Debug        bool
+		HTTPErrorHandler
+		Binder          Binder
+		Renderer        Renderer
+		AutoTLSManager  autocert.Manager
+		ShutdownTimeout time.Duration
+		Color           *color.Color
+		Logger          Logger
+		server          *graceful.Server
+		tlsServer       *graceful.Server
+		premiddleware   []MiddlewareFunc
+		middleware      []MiddlewareFunc
+		maxParam        *int
+		router          *Router
+		notFoundHandler HandlerFunc
+		pool            sync.Pool
 	}
 
 	// Route contains a handler and information for matching against requests.
@@ -91,7 +88,7 @@ type (
 	// HTTPError represents an error that occurred while handling a request.
 	HTTPError struct {
 		Code    int
-		Message interface{}
+		Message string
 	}
 
 	// MiddlewareFunc defines a function to process middleware.
@@ -105,7 +102,7 @@ type (
 
 	// Validator is the interface that wraps the Validate function.
 	Validator interface {
-		Validate(i interface{}) error
+		Validate() error
 	}
 
 	// Renderer is the interface that wraps the Render function.
@@ -155,7 +152,7 @@ const (
 )
 
 const (
-	charsetUTF8 = "charset=UTF-8"
+	charsetUTF8 = "charset=utf-8"
 )
 
 // Headers
@@ -220,10 +217,9 @@ var (
 	ErrUnauthorized                = NewHTTPError(http.StatusUnauthorized)
 	ErrMethodNotAllowed            = NewHTTPError(http.StatusMethodNotAllowed)
 	ErrStatusRequestEntityTooLarge = NewHTTPError(http.StatusRequestEntityTooLarge)
-	ErrValidatorNotRegistered      = errors.New("Validator not registered")
-	ErrRendererNotRegistered       = errors.New("Renderer not registered")
-	ErrInvalidRedirectCode         = errors.New("Invalid redirect status code")
-	ErrCookieNotFound              = errors.New("Cookie not found")
+	ErrRendererNotRegistered       = errors.New("renderer not registered")
+	ErrInvalidRedirectCode         = errors.New("invalid redirect status code")
+	ErrCookieNotFound              = errors.New("cookie not found")
 )
 
 // Error handlers
@@ -240,21 +236,17 @@ var (
 // New creates an instance of Echo.
 func New() (e *Echo) {
 	e = &Echo{
-		Server:    new(http.Server),
-		TLSServer: new(http.Server),
 		AutoTLSManager: autocert.Manager{
 			Prompt: autocert.AcceptTOS,
 		},
-		Logger:   log.New("echo"),
-		colorer:  color.New(),
-		maxParam: new(int),
+		ShutdownTimeout: 15 * time.Second,
+		Logger:          glog.New("echo"),
+		maxParam:        new(int),
+		Color:           color.New(),
 	}
-	e.Server.Handler = e
-	e.TLSServer.Handler = e
 	e.HTTPErrorHandler = e.DefaultHTTPErrorHandler
-	e.Binder = &DefaultBinder{}
-	e.Logger.SetLevel(log.OFF)
-	e.stdLogger = slog.New(e.Logger.Output(), e.Logger.Prefix()+": ", 0)
+	e.Binder = &binder{}
+	e.Logger.SetLevel(glog.OFF)
 	e.pool.New = func() interface{} {
 		return e.NewContext(nil, nil)
 	}
@@ -279,36 +271,24 @@ func (e *Echo) Router() *Router {
 	return e.router
 }
 
-// DefaultHTTPErrorHandler is the default HTTP error handler. It sends a JSON response
-// with status code.
+// DefaultHTTPErrorHandler invokes the default HTTP error handler.
 func (e *Echo) DefaultHTTPErrorHandler(err error, c Context) {
-	var (
-		code = http.StatusInternalServerError
-		msg  interface{}
-	)
-
+	code := http.StatusInternalServerError
+	msg := http.StatusText(code)
 	if he, ok := err.(*HTTPError); ok {
 		code = he.Code
 		msg = he.Message
-	} else {
-		msg = http.StatusText(code)
 	}
-	if _, ok := msg.(string); ok {
-		msg = Map{"message": msg}
+	if e.Debug {
+		msg = err.Error()
 	}
-
 	if !c.Response().Committed {
 		if c.Request().Method == HEAD { // Issue #608
-			if err := c.NoContent(code); err != nil {
-				goto ERROR
-			}
+			c.NoContent(code)
 		} else {
-			if err := c.JSON(code, msg); err != nil {
-				goto ERROR
-			}
+			c.String(code, msg)
 		}
 	}
-ERROR:
 	e.Logger.Error(err)
 }
 
@@ -501,7 +481,7 @@ func (e *Echo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Middleware
 	h := func(c Context) error {
 		method := r.Method
-		path := r.URL.EscapedPath()
+		path := r.URL.Path
 		e.router.Find(method, path, c)
 		h := c.Handler()
 		for i := len(e.middleware) - 1; i >= 0; i-- {
@@ -523,81 +503,82 @@ func (e *Echo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e.pool.Put(c)
 }
 
-// Start starts an HTTP server.
+// Start starts the HTTP server.
 func (e *Echo) Start(address string) error {
-	e.Server.Addr = address
-	return e.StartServer(e.Server)
+	return e.StartServer(&http.Server{Addr: address})
 }
 
-// StartTLS starts an HTTPS server.
+// StartTLS starts the HTTPS server.
 func (e *Echo) StartTLS(address string, certFile, keyFile string) (err error) {
 	if certFile == "" || keyFile == "" {
 		return errors.New("invalid tls configuration")
 	}
-	s := e.TLSServer
-	s.TLSConfig = new(tls.Config)
-	s.TLSConfig.Certificates = make([]tls.Certificate, 1)
-	s.TLSConfig.Certificates[0], err = tls.LoadX509KeyPair(certFile, keyFile)
+	config := new(tls.Config)
+	config.Certificates = make([]tls.Certificate, 1)
+	config.Certificates[0], err = tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return
 	}
-	return e.startTLS(address)
+	return e.startTLS(address, config)
 }
 
-// StartAutoTLS starts an HTTPS server using certificates automatically from https://letsencrypt.org.
+// StartAutoTLS starts the HTTPS server using certificates automatically from https://letsencrypt.org.
 func (e *Echo) StartAutoTLS(address string) error {
-	s := e.TLSServer
-	s.TLSConfig = new(tls.Config)
-	s.TLSConfig.GetCertificate = e.AutoTLSManager.GetCertificate
-	return e.startTLS(address)
+	config := new(tls.Config)
+	config.GetCertificate = e.AutoTLSManager.GetCertificate
+	return e.startTLS(address, config)
 }
 
-func (e *Echo) startTLS(address string) error {
-	s := e.TLSServer
-	s.Addr = address
+func (e *Echo) startTLS(address string, config *tls.Config) error {
 	if !e.DisableHTTP2 {
-		s.TLSConfig.NextProtos = append(s.TLSConfig.NextProtos, "h2")
+		config.NextProtos = append(config.NextProtos, "h2")
 	}
-	return e.StartServer(e.TLSServer)
+	return e.StartServer(&http.Server{
+		Addr:      address,
+		TLSConfig: config,
+	})
 }
 
-// StartServer starts a custom http server.
+// StartServer runs a custom HTTP server.
 func (e *Echo) StartServer(s *http.Server) error {
-	// Setup
-	e.colorer.SetOutput(e.Logger.Output())
 	s.Handler = e
-	s.ErrorLog = e.stdLogger
-
-	l, err := net.Listen("tcp", s.Addr)
-	if err != nil {
-		return err
+	gs := &graceful.Server{
+		Server:  s,
+		Timeout: e.ShutdownTimeout,
+		Logger:  log.New(e.Logger.Output(), e.Logger.Prefix()+": ", 0),
 	}
 	if s.TLSConfig == nil {
-		if e.Listener == nil {
-			e.Listener = tcpKeepAliveListener{l.(*net.TCPListener)}
-		}
-		e.colorer.Printf("⇛ http server started on %s\n", e.colorer.Green(s.Addr))
-		return s.Serve(e.Listener)
+		e.server = gs
+		e.Color.Printf(" ⇛ http server started on %s\n", color.Green(s.Addr))
+		return gs.ListenAndServe()
 	}
-	if e.TLSListener == nil {
-		e.TLSListener = tls.NewListener(tcpKeepAliveListener{l.(*net.TCPListener)}, s.TLSConfig)
-	}
-	e.colorer.Printf("⇛ https server started on %s\n", e.colorer.Green(s.Addr))
-	return s.Serve(e.TLSListener)
+	e.tlsServer = gs
+	e.Color.Printf(" ⇛ https server started on %s\n", color.Green(s.Addr))
+	return gs.ListenAndServeTLSConfig(s.TLSConfig)
+}
+
+// Shutdown gracefully shutdown the HTTP server with timeout.
+func (e *Echo) Shutdown(timeout time.Duration) {
+	e.server.Stop(timeout)
+}
+
+// ShutdownTLS gracefully shutdown the TLS server with timeout.
+func (e *Echo) ShutdownTLS(timeout time.Duration) {
+	e.tlsServer.Stop(timeout)
 }
 
 // NewHTTPError creates a new HTTPError instance.
-func NewHTTPError(code int, message ...interface{}) *HTTPError {
+func NewHTTPError(code int, msg ...interface{}) *HTTPError {
 	he := &HTTPError{Code: code, Message: http.StatusText(code)}
-	if len(message) > 0 {
-		he.Message = message[0]
+	if len(msg) > 0 {
+		he.Message = fmt.Sprint(msg...)
 	}
 	return he
 }
 
 // Error makes it compatible with `error` interface.
-func (he *HTTPError) Error() string {
-	return fmt.Sprintf("code=%d, message=%s", he.Code, he.Message)
+func (e *HTTPError) Error() string {
+	return e.Message
 }
 
 // WrapHandler wraps `http.Handler` into `echo.HandlerFunc`.
@@ -627,22 +608,4 @@ func handlerName(h HandlerFunc) string {
 		return runtime.FuncForPC(reflect.ValueOf(h).Pointer()).Name()
 	}
 	return t.String()
-}
-
-// tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
-// connections. It's used by ListenAndServe and ListenAndServeTLS so
-// dead TCP connections (e.g. closing laptop mid-download) eventually
-// go away.
-type tcpKeepAliveListener struct {
-	*net.TCPListener
-}
-
-func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
-	tc, err := ln.AcceptTCP()
-	if err != nil {
-		return
-	}
-	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(3 * time.Minute)
-	return tc, nil
 }
