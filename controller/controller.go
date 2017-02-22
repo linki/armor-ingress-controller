@@ -100,6 +100,34 @@ func (c *Controller) GenerateConfig(ingresses ...extensions.Ingress) (*armor.Arm
 	}
 
 	for _, ingress := range ingresses {
+		defaultBackend := ingress.Spec.Backend
+
+		if defaultBackend != nil {
+			service, err := c.Client.Core().Services(ingress.Namespace).Get(defaultBackend.ServiceName)
+			if err != nil {
+				if errors.IsNotFound(err) {
+					log.Errorf("Can't find service '%s/%s' for ingress '%s/%s'",
+						ingress.Namespace, defaultBackend.ServiceName, ingress.Namespace, ingress.Name)
+					continue
+				}
+
+				return nil, err
+			}
+
+			target := map[string]string{
+				"url": upstreamServiceURL(service.Spec.ClusterIP, defaultBackend.ServicePort.String()),
+			}
+
+			proxy := armor.Plugin{
+				"name":    "proxy",
+				"targets": []map[string]string{target},
+			}
+
+			config.Hosts["*"] = &armor.Host{
+				Plugins: []armor.Plugin{proxy},
+			}
+		}
+
 		for _, rule := range ingress.Spec.Rules {
 			// TODO(linki): is this needed or would that be an invalid ingress anyways?
 			if rule.HTTP == nil {

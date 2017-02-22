@@ -26,6 +26,7 @@ func TestNew(t *testing.T) {
 
 func TestGetIngresses(t *testing.T) {
 	fixtures := []*extensions.Ingress{
+
 		// main object under test
 		{
 			ObjectMeta: v1.ObjectMeta{
@@ -40,7 +41,7 @@ func TestGetIngresses(t *testing.T) {
 		// supports multiple ingresses
 		{
 			ObjectMeta: v1.ObjectMeta{
-				Namespace: "armor-test",
+				Namespace: "armor-fred",
 				Name:      "bar",
 				Annotations: map[string]string{
 					"kubernetes.io/ingress.class": "armor",
@@ -60,7 +61,7 @@ func TestGetIngresses(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	for _, fixture := range fixtures {
-		if _, err := client.Extensions().Ingresses("armor-test").Create(fixture); err != nil {
+		if _, err := client.Extensions().Ingresses(fixture.Namespace).Create(fixture); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -69,33 +70,14 @@ func TestGetIngresses(t *testing.T) {
 
 	ingresses, err := controller.GetIngresses()
 	if err != nil {
-		t.Error(err)
-	}
-
-	if len(ingresses) != 2 {
-		t.Fatalf("expected 2, got %d", len(ingresses))
+		t.Fatal(err)
 	}
 
 	// TODO(linki): make tests independent of ordering
-	ingress := ingresses[0]
-
-	if ingress.Name != "foo" {
-		t.Errorf("expected foo, got %s", ingress.Name)
-	}
-
-	if ingress.Namespace != "armor-test" {
-		t.Errorf("expected default, got %s", ingress.Namespace)
-	}
-
-	ingress = ingresses[1]
-
-	if ingress.Name != "bar" {
-		t.Errorf("expected bar, got %s", ingress.Name)
-	}
-
-	if ingress.Namespace != "armor-test" {
-		t.Errorf("expected armor, got %s", ingress.Namespace)
-	}
+	validateIngresses(t, ingresses, []map[string]string{
+		{"namespace": "armor-test", "name": "foo"},
+		{"namespace": "armor-fred", "name": "bar"},
+	})
 }
 
 func TestUpdateIngressLoadBalancer(t *testing.T) {
@@ -193,6 +175,10 @@ func TestGenerateConfig(t *testing.T) {
 				Name:      "foo",
 			},
 			Spec: extensions.IngressSpec{
+				Backend: &extensions.IngressBackend{
+					ServiceName: "fred",
+					ServicePort: intstr.FromInt(9090),
+				},
 				Rules: []extensions.IngressRule{
 					{
 						Host: "foo.bar.com",
@@ -269,6 +255,16 @@ func TestGenerateConfig(t *testing.T) {
 	}
 
 	services := []v1.Service{
+		// default backend
+		{
+			ObjectMeta: v1.ObjectMeta{
+				Namespace: "armor",
+				Name:      "fred",
+			},
+			Spec: v1.ServiceSpec{
+				ClusterIP: "4.3.2.1",
+			},
+		},
 		{
 			ObjectMeta: v1.ObjectMeta{
 				Namespace: "armor",
@@ -314,8 +310,8 @@ func TestGenerateConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(config.Hosts) != 3 {
-		t.Fatalf("expected 3, got %d", len(config.Hosts))
+	if len(config.Hosts) != 4 {
+		t.Fatalf("expected 4, got %d", len(config.Hosts))
 	}
 
 	if _, exists := config.Hosts["foo.bar.com"]; !exists {
@@ -327,6 +323,10 @@ func TestGenerateConfig(t *testing.T) {
 	}
 
 	if _, exists := config.Hosts["qux.quux.com"]; !exists {
+		t.Errorf("expected something, got nothing")
+	}
+
+	if _, exists := config.Hosts["*"]; !exists {
 		t.Errorf("expected something, got nothing")
 	}
 
@@ -403,6 +403,41 @@ func TestGenerateConfig(t *testing.T) {
 
 	expected = "http://1.2.3.4:443"
 
+	if targets[0]["url"] != expected {
+		t.Fatalf("expected %s, got %#v", expected, targets[0]["url"])
+	}
+
+	// test wildcard
+
+	wildcard := config.Hosts["*"]
+
+	if len(wildcard.Plugins) != 1 {
+		t.Fatalf("expected 1, got %d", len(wildcard.Plugins))
+	}
+
+	proxy = wildcard.Plugins[0]
+
+	if _, exists := proxy["name"]; !exists {
+		t.Fatalf("expected something, got nothing")
+	}
+
+	if _, exists := proxy["targets"]; !exists {
+		t.Fatalf("expected something, got nothing")
+	}
+
+	if proxy["name"].(string) != "proxy" {
+		t.Fatalf("expected proxy, got %#v", proxy["name"])
+	}
+
+	targets = proxy["targets"].([]map[string]string)
+
+	if len(targets) != 1 {
+		t.Fatalf("expected 1, got %d", len(targets))
+	}
+
+	expected = "http://4.3.2.1:9090"
+
+	// TODO(linki): make tests independent of ordering
 	if targets[0]["url"] != expected {
 		t.Fatalf("expected %s, got %#v", expected, targets[0]["url"])
 	}
@@ -799,12 +834,24 @@ func TestUpdatePodsByLabelSelector(t *testing.T) {
 	}
 
 	fixtures := []*v1.Pod{
-		// should be removed
+		// should be removed: no annotation
 		{
 			ObjectMeta: v1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "foo",
 				Labels:    labelSet,
+			},
+		},
+
+		// should be removed: outdated annotation
+		{
+			ObjectMeta: v1.ObjectMeta{
+				Namespace: "armor-test",
+				Name:      "fred",
+				Labels:    labelSet,
+				Annotations: map[string]string{
+					"armor.labstack.com/configHash": "out-of-date",
+				},
 			},
 		},
 
@@ -953,5 +1000,27 @@ func TestUpstreamServiceURL(t *testing.T) {
 		if got != test.want {
 			t.Errorf("upstreamServiceURL(%q, %q) => %q, want %q", test.ip, test.port, got, test.want)
 		}
+	}
+}
+
+// test helper functions
+
+func validateIngresses(t *testing.T, ingresses []extensions.Ingress, expected []map[string]string) {
+	if len(ingresses) != len(expected) {
+		t.Fatalf("expected %d ingresses, got %d", len(expected), len(ingresses))
+	}
+
+	for i := range ingresses {
+		validateIngress(t, ingresses[i], expected[i])
+	}
+}
+
+func validateIngress(t *testing.T, ingress extensions.Ingress, expected map[string]string) {
+	if ingress.Name != expected["name"] {
+		t.Errorf("expected %s, got %s", expected["name"], ingress.Name)
+	}
+
+	if ingress.Namespace != expected["namespace"] {
+		t.Errorf("expected %s, got %s", expected["namespace"], ingress.Namespace)
 	}
 }
