@@ -1,5 +1,5 @@
-hash: e51bc38570aa5e67a753580626e9905a8a3410b07592e83bd695b46caa37955c
-updated: 2017-11-24T16:26:53.081798258+01:00
+hash: 37997e3ba6f7d1603dd7b7cf079264df1c9f891f99f0fffd3e436db88ce67d20
+updated: 2017-11-24T16:53:25.198498932+01:00
 imports:
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
@@ -38,9 +38,9 @@ imports:
 - name: github.com/go-openapi/jsonreference
   version: 13c6e3589ad90f49bd3e3bbe2c2cb3d7a4142272
 - name: github.com/go-openapi/spec
-  version: 7abd5745472fff5eb3685386d5fb8bf38683154d
+  version: 6aced65f8501fe1217321abf0749d354824ba2ff
 - name: github.com/go-openapi/swag
-  version: f3f9494671f93fcff853e3c6e9e948b3eb71e590
+  version: 1d0bd113de87027671077d3c71eb3ac5d7dbba72
 - name: github.com/gogo/protobuf
   version: c0656edd0d9eab7c66d1eb0c568f9039345796f7
   subpackages:
@@ -97,7 +97,7 @@ imports:
   - color
   - log
 - name: github.com/mailru/easyjson
-  version: 2f5df55504ebc322e4d52d34df6a1f5b503bf26d
+  version: d5b7844b561a7bc640052f1b935f7b800330d7e0
   subpackages:
   - buffer
   - jlexer
@@ -332,7 +332,7 @@ imports:
   - util/integer
   - util/jsonpath
 - name: k8s.io/kube-openapi
-  version: 61b46af70dfed79c6d24530cd23b41440a7f22a5
+  version: 868f2f29720b192240e18284659231b440f9cda5
   subpackages:
   - pkg/common
 testImports: []

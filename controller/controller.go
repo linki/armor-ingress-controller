@@ -2,7 +2,6 @@ package controller
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"strconv"
@@ -10,6 +9,7 @@ import (
 	"github.com/labstack/armor"
 	"github.com/mitchellh/hashstructure"
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v2"
 
 	"k8s.io/api/core/v1"
 	extensions "k8s.io/api/extensions/v1beta1"
@@ -181,10 +181,19 @@ func (c *Controller) WriteConfigToConfigMap(config *armor.Armor, configMap *v1.C
 	return nil
 }
 
-// WriteConfigToWriter writes the JSON representation of an Armor config to a
+// WriteConfigToWriter writes the YAML representation of an Armor config to a
 // Writer.
 func (c *Controller) WriteConfigToWriter(config *armor.Armor, writer io.Writer) error {
-	return json.NewEncoder(writer).Encode(config)
+	buffer, err := yaml.Marshal(&config)
+	if err != nil {
+		return err
+	}
+
+	if _, err := writer.Write(buffer); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // EnsureConfigMap creates a ConfigMap specified by namespace and name if it

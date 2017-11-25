@@ -2,11 +2,10 @@ package controller
 
 import (
 	"bytes"
-	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/labstack/armor"
+	"gopkg.in/yaml.v2"
 
 	"k8s.io/api/core/v1"
 	extensions "k8s.io/api/extensions/v1beta1"
@@ -526,7 +525,7 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 
 	var loaded armor.Armor
 
-	if err := json.NewDecoder(strings.NewReader(configMap.Data["bar"])).Decode(&loaded); err != nil {
+	if err := yaml.Unmarshal([]byte(configMap.Data["bar"]), &loaded); err != nil {
 		t.Fatal(err)
 	}
 
@@ -581,7 +580,7 @@ func TestWriteConfigToConfigMap(t *testing.T) {
 
 	var loaded armor.Armor
 
-	if err := json.NewDecoder(strings.NewReader(configMap.Data["bar"])).Decode(&loaded); err != nil {
+	if err := yaml.Unmarshal([]byte(configMap.Data["bar"]), &loaded); err != nil {
 		t.Fatal(err)
 	}
 
@@ -617,7 +616,7 @@ func TestWriteConfigToWriter(t *testing.T) {
 
 	var loaded armor.Armor
 
-	if err := json.NewDecoder(&buffer).Decode(&loaded); err != nil {
+	if err := yaml.Unmarshal(buffer.Bytes(), &loaded); err != nil {
 		t.Fatal(err)
 	}
 
