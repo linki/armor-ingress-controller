@@ -7,15 +7,16 @@ import (
 	"io"
 	"strconv"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/labstack/armor"
 	"github.com/mitchellh/hashstructure"
+	log "github.com/sirupsen/logrus"
 
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/pkg/api/errors"
 	"k8s.io/client-go/pkg/api/v1"
 	extensions "k8s.io/client-go/pkg/apis/extensions/v1beta1"
-	"k8s.io/client-go/pkg/labels"
 )
 
 const (
@@ -44,7 +45,7 @@ func NewController(client kubernetes.Interface) *Controller {
 // GetIngresses returns a slice of all Ingress objects that are annotated with
 // this controller's annotation identifier.
 func (c *Controller) GetIngresses() ([]extensions.Ingress, error) {
-	ingressList, err := c.Client.Extensions().Ingresses(v1.NamespaceAll).List(v1.ListOptions{})
+	ingressList, err := c.Client.Extensions().Ingresses(v1.NamespaceAll).List(metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +110,7 @@ func (c *Controller) GenerateConfig(ingresses ...extensions.Ingress) (*armor.Arm
 			targets := make([]map[string]string, 0, len(rule.HTTP.Paths))
 
 			for _, path := range rule.HTTP.Paths {
-				service, err := c.Client.Core().Services(ingress.Namespace).Get(path.Backend.ServiceName)
+				service, err := c.Client.Core().Services(ingress.Namespace).Get(path.Backend.ServiceName, metav1.GetOptions{})
 				if err != nil {
 					if errors.IsNotFound(err) {
 						log.Errorf("Can't find service '%s/%s' for ingress '%s/%s'",
@@ -145,7 +146,7 @@ func (c *Controller) GenerateConfig(ingresses ...extensions.Ingress) (*armor.Arm
 // name and stores the JSON representation of the passed in Armor config under
 // the provided key.
 func (c *Controller) WriteConfigToConfigMapByName(config *armor.Armor, namespace, configMapName, key string) error {
-	configMap, err := c.Client.Core().ConfigMaps(namespace).Get(configMapName)
+	configMap, err := c.Client.Core().ConfigMaps(namespace).Get(configMapName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
@@ -189,12 +190,12 @@ func (c *Controller) WriteConfigToWriter(config *armor.Armor, writer io.Writer) 
 // EnsureConfigMap creates a ConfigMap specified by namespace and name if it
 // doesn't already exist.
 func (c *Controller) EnsureConfigMap(namespace, configMapName string) error {
-	if _, err := c.Client.Core().ConfigMaps(namespace).Get(configMapName); err == nil {
+	if _, err := c.Client.Core().ConfigMaps(namespace).Get(configMapName, metav1.GetOptions{}); err == nil {
 		return nil
 	}
 
 	configMap := &v1.ConfigMap{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: namespace,
 			Name:      configMapName,
 		},
@@ -209,7 +210,7 @@ func (c *Controller) EnsureConfigMap(namespace, configMapName string) error {
 
 // UpdateDeploymentByName updates a Deployment identified by namespace and name.
 func (c *Controller) UpdateDeploymentByName(namespace string, deploymentName string, config *armor.Armor) error {
-	deployment, err := c.Client.Extensions().Deployments(namespace).Get(deploymentName)
+	deployment, err := c.Client.Extensions().Deployments(namespace).Get(deploymentName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
@@ -246,7 +247,7 @@ func (c *Controller) UpdateDeployment(deployment *extensions.Deployment, config 
 
 // UpdateDaemonSetByName updates a DaemonSet identified by namespace and name.
 func (c *Controller) UpdateDaemonSetByName(namespace string, daemonSetName string, config *armor.Armor) (*extensions.DaemonSet, error) {
-	daemonSet, err := c.Client.Extensions().DaemonSets(namespace).Get(daemonSetName)
+	daemonSet, err := c.Client.Extensions().DaemonSets(namespace).Get(daemonSetName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +292,7 @@ func (c *Controller) UpdateDaemonSet(daemonSet *extensions.DaemonSet, config *ar
 func (c *Controller) UpdatePodsByLabelSelector(namespace string, selector labels.Selector, config *armor.Armor) error {
 	configHash := getConfigHash(config)
 
-	listOptions := v1.ListOptions{LabelSelector: selector.String()}
+	listOptions := metav1.ListOptions{LabelSelector: selector.String()}
 
 	pods, err := c.Client.Core().Pods(namespace).List(listOptions)
 	if err != nil {
@@ -313,7 +314,7 @@ func (c *Controller) UpdatePodsByLabelSelector(namespace string, selector labels
 func (c *Controller) GetNodeIPs() ([]string, error) {
 	nodeIPs := []string{}
 
-	nodes, err := c.Client.Core().Nodes().List(v1.ListOptions{})
+	nodes, err := c.Client.Core().Nodes().List(metav1.ListOptions{})
 	if err != nil {
 		return nodeIPs, err
 	}

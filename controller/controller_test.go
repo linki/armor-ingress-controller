@@ -8,11 +8,12 @@ import (
 
 	"github.com/labstack/armor"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/pkg/api/v1"
 	extensions "k8s.io/client-go/pkg/apis/extensions/v1beta1"
-	"k8s.io/client-go/pkg/labels"
-	"k8s.io/client-go/pkg/util/intstr"
 )
 
 func TestNew(t *testing.T) {
@@ -28,7 +29,7 @@ func TestGetIngresses(t *testing.T) {
 	fixtures := []*extensions.Ingress{
 		// main object under test
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "foo",
 				Annotations: map[string]string{
@@ -39,7 +40,7 @@ func TestGetIngresses(t *testing.T) {
 
 		// supports multiple ingresses
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "bar",
 				Annotations: map[string]string{
@@ -50,7 +51,7 @@ func TestGetIngresses(t *testing.T) {
 
 		// filtered out by annotation
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "baz",
 			},
@@ -102,7 +103,7 @@ func TestUpdateIngressLoadBalancer(t *testing.T) {
 	fixtures := []extensions.Ingress{
 		// main object under test
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "foo",
 			},
@@ -110,7 +111,7 @@ func TestUpdateIngressLoadBalancer(t *testing.T) {
 
 		// supports multiple ingresses
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "bar",
 			},
@@ -133,7 +134,7 @@ func TestUpdateIngressLoadBalancer(t *testing.T) {
 
 	// check first one
 
-	ingress, err := client.Extensions().Ingresses("armor-test").Get("foo")
+	ingress, err := client.Extensions().Ingresses("armor-test").Get("foo", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +160,7 @@ func TestUpdateIngressLoadBalancer(t *testing.T) {
 
 	// check second one
 
-	ingress, err = client.Extensions().Ingresses("armor-test").Get("bar")
+	ingress, err = client.Extensions().Ingresses("armor-test").Get("bar", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +189,7 @@ func TestGenerateConfig(t *testing.T) {
 	fixtures := []extensions.Ingress{
 		// main object under test
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor",
 				Name:      "foo",
 			},
@@ -242,7 +243,7 @@ func TestGenerateConfig(t *testing.T) {
 
 		// supports multiple ingresses
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-2",
 				Name:      "qux",
 			},
@@ -270,7 +271,7 @@ func TestGenerateConfig(t *testing.T) {
 
 	services := []v1.Service{
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor",
 				Name:      "bar",
 			},
@@ -279,7 +280,7 @@ func TestGenerateConfig(t *testing.T) {
 			},
 		},
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor",
 				Name:      "baz",
 			},
@@ -289,7 +290,7 @@ func TestGenerateConfig(t *testing.T) {
 		},
 		// different namespace
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-2",
 				Name:      "qux",
 			},
@@ -475,7 +476,7 @@ func TestEnsureConfigMap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := client.Core().ConfigMaps("armor-test").Get("foo"); err != nil {
+	if _, err := client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -486,7 +487,7 @@ func TestEnsureConfigMap(t *testing.T) {
 
 func TestWriteConfigToConfigMapByName(t *testing.T) {
 	configMap := &v1.ConfigMap{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "armor-test",
 			Name:      "foo",
 		},
@@ -512,7 +513,7 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	configMap, err := client.Core().ConfigMaps("armor-test").Get("foo")
+	configMap, err := client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +545,7 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 
 func TestWriteConfigToConfigMap(t *testing.T) {
 	configMap := &v1.ConfigMap{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "armor-test",
 			Name:      "foo",
 		},
@@ -573,7 +574,7 @@ func TestWriteConfigToConfigMap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	configMap, err := client.Core().ConfigMaps("armor-test").Get("foo")
+	configMap, err := client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -635,7 +636,7 @@ func TestWriteConfigToWriter(t *testing.T) {
 
 func TestUpdateDeploymentByName(t *testing.T) {
 	deployment := &extensions.Deployment{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "armor-test",
 			Name:      "foo",
 		},
@@ -654,7 +655,7 @@ func TestUpdateDeploymentByName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deployment, err := client.Extensions().Deployments("armor-test").Get("foo")
+	deployment, err := client.Extensions().Deployments("armor-test").Get("foo", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -674,7 +675,7 @@ func TestUpdateDeploymentByName(t *testing.T) {
 
 func TestUpdateDeployment(t *testing.T) {
 	deployment := &extensions.Deployment{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "armor-test",
 			Name:      "foo",
 		},
@@ -693,7 +694,7 @@ func TestUpdateDeployment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deployment, err := client.Extensions().Deployments("armor-test").Get("foo")
+	deployment, err := client.Extensions().Deployments("armor-test").Get("foo", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -713,7 +714,7 @@ func TestUpdateDeployment(t *testing.T) {
 
 func TestUpdateDaemonSetByName(t *testing.T) {
 	daemonSet := &extensions.DaemonSet{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "armor-test",
 			Name:      "foo",
 		},
@@ -733,7 +734,7 @@ func TestUpdateDaemonSetByName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	daemonSet, err = client.Extensions().DaemonSets("armor-test").Get(daemonSet.Name)
+	daemonSet, err = client.Extensions().DaemonSets("armor-test").Get(daemonSet.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -753,7 +754,7 @@ func TestUpdateDaemonSetByName(t *testing.T) {
 
 func TestUpdateDaemonSet(t *testing.T) {
 	daemonSet := &extensions.DaemonSet{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "armor-test",
 			Name:      "foo",
 		},
@@ -773,7 +774,7 @@ func TestUpdateDaemonSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	daemonSet, err = client.Extensions().DaemonSets("armor-test").Get(daemonSet.Name)
+	daemonSet, err = client.Extensions().DaemonSets("armor-test").Get(daemonSet.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -801,7 +802,7 @@ func TestUpdatePodsByLabelSelector(t *testing.T) {
 	fixtures := []*v1.Pod{
 		// should be removed
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "foo",
 				Labels:    labelSet,
@@ -810,7 +811,7 @@ func TestUpdatePodsByLabelSelector(t *testing.T) {
 
 		// should not be removed: different namespace
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor",
 				Name:      "bar",
 				Labels:    labelSet,
@@ -819,7 +820,7 @@ func TestUpdatePodsByLabelSelector(t *testing.T) {
 
 		// should not be removed: doesn't match labels
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "qux",
 			},
@@ -827,7 +828,7 @@ func TestUpdatePodsByLabelSelector(t *testing.T) {
 
 		// should not be removed: config up to date
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "waldo",
 				Labels:    labelSet,
@@ -852,7 +853,7 @@ func TestUpdatePodsByLabelSelector(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pods, err := client.Core().Pods(v1.NamespaceAll).List(v1.ListOptions{})
+	pods, err := client.Core().Pods(v1.NamespaceAll).List(metav1.ListOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -876,7 +877,7 @@ func TestUpdatePodsByLabelSelector(t *testing.T) {
 
 func TestGetNodeIPs(t *testing.T) {
 	node := &v1.Node{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name: "foo",
 		},
 		Status: v1.NodeStatus{
