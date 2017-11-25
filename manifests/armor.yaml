@@ -4,6 +4,8 @@ metadata:
   name: armor
   namespace: kube-system
 spec:
+  updateStrategy:
+    type: RollingUpdate
   template:
     metadata:
       labels:
@@ -11,7 +13,7 @@ spec:
     spec:
       containers:
       - name: armor
-        image: labstack/armor:0.2.6
+        image: labstack/armor:0.3.3
         args:
         - -c
         - /etc/armor/armor.json

@@ -2,17 +2,17 @@ package controller
 
 import (
 	"bytes"
-	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/labstack/armor"
+	"gopkg.in/yaml.v2"
 
+	"k8s.io/api/core/v1"
+	extensions "k8s.io/api/extensions/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/pkg/api/v1"
-	extensions "k8s.io/client-go/pkg/apis/extensions/v1beta1"
-	"k8s.io/client-go/pkg/labels"
-	"k8s.io/client-go/pkg/util/intstr"
 )
 
 func TestNew(t *testing.T) {
@@ -28,7 +28,7 @@ func TestGetIngresses(t *testing.T) {
 	fixtures := []*extensions.Ingress{
 		// main object under test
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "foo",
 				Annotations: map[string]string{
@@ -39,7 +39,7 @@ func TestGetIngresses(t *testing.T) {
 
 		// supports multiple ingresses
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "bar",
 				Annotations: map[string]string{
@@ -50,7 +50,7 @@ func TestGetIngresses(t *testing.T) {
 
 		// filtered out by annotation
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "baz",
 			},
@@ -102,7 +102,7 @@ func TestUpdateIngressLoadBalancer(t *testing.T) {
 	fixtures := []extensions.Ingress{
 		// main object under test
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "foo",
 			},
@@ -110,7 +110,7 @@ func TestUpdateIngressLoadBalancer(t *testing.T) {
 
 		// supports multiple ingresses
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-test",
 				Name:      "bar",
 			},
@@ -133,7 +133,7 @@ func TestUpdateIngressLoadBalancer(t *testing.T) {
 
 	// check first one
 
-	ingress, err := client.Extensions().Ingresses("armor-test").Get("foo")
+	ingress, err := client.Extensions().Ingresses("armor-test").Get("foo", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestUpdateIngressLoadBalancer(t *testing.T) {
 
 	// check second one
 
-	ingress, err = client.Extensions().Ingresses("armor-test").Get("bar")
+	ingress, err = client.Extensions().Ingresses("armor-test").Get("bar", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestGenerateConfig(t *testing.T) {
 	fixtures := []extensions.Ingress{
 		// main object under test
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor",
 				Name:      "foo",
 			},
@@ -242,7 +242,7 @@ func TestGenerateConfig(t *testing.T) {
 
 		// supports multiple ingresses
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-2",
 				Name:      "qux",
 			},
@@ -270,7 +270,7 @@ func TestGenerateConfig(t *testing.T) {
 
 	services := []v1.Service{
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor",
 				Name:      "bar",
 			},
@@ -279,7 +279,7 @@ func TestGenerateConfig(t *testing.T) {
 			},
 		},
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor",
 				Name:      "baz",
 			},
@@ -289,7 +289,7 @@ func TestGenerateConfig(t *testing.T) {
 		},
 		// different namespace
 		{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "armor-2",
 				Name:      "qux",
 			},
@@ -475,7 +475,7 @@ func TestEnsureConfigMap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := client.Core().ConfigMaps("armor-test").Get("foo"); err != nil {
+	if _, err := client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -486,7 +486,7 @@ func TestEnsureConfigMap(t *testing.T) {
 
 func TestWriteConfigToConfigMapByName(t *testing.T) {
 	configMap := &v1.ConfigMap{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "armor-test",
 			Name:      "foo",
 		},
@@ -512,7 +512,7 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	configMap, err := client.Core().ConfigMaps("armor-test").Get("foo")
+	configMap, err := client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +525,7 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 
 	var loaded armor.Armor
 
-	if err := json.NewDecoder(strings.NewReader(configMap.Data["bar"])).Decode(&loaded); err != nil {
+	if err := yaml.Unmarshal([]byte(configMap.Data["bar"]), &loaded); err != nil {
 		t.Fatal(err)
 	}
 
@@ -544,7 +544,7 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 
 func TestWriteConfigToConfigMap(t *testing.T) {
 	configMap := &v1.ConfigMap{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "armor-test",
 			Name:      "foo",
 		},
@@ -573,14 +573,14 @@ func TestWriteConfigToConfigMap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	configMap, err := client.Core().ConfigMaps("armor-test").Get("foo")
+	configMap, err := client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var loaded armor.Armor
 
-	if err := json.NewDecoder(strings.NewReader(configMap.Data["bar"])).Decode(&loaded); err != nil {
+	if err := yaml.Unmarshal([]byte(configMap.Data["bar"]), &loaded); err != nil {
 		t.Fatal(err)
 	}
 
@@ -616,7 +616,7 @@ func TestWriteConfigToWriter(t *testing.T) {
 
 	var loaded armor.Armor
 
-	if err := json.NewDecoder(&buffer).Decode(&loaded); err != nil {
+	if err := yaml.Unmarshal(buffer.Bytes(), &loaded); err != nil {
 		t.Fatal(err)
 	}
 
@@ -635,7 +635,7 @@ func TestWriteConfigToWriter(t *testing.T) {
 
 func TestUpdateDeploymentByName(t *testing.T) {
 	deployment := &extensions.Deployment{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "armor-test",
 			Name:      "foo",
 		},
@@ -654,7 +654,7 @@ func TestUpdateDeploymentByName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deployment, err := client.Extensions().Deployments("armor-test").Get("foo")
+	deployment, err := client.Extensions().Deployments("armor-test").Get("foo", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -674,7 +674,7 @@ func TestUpdateDeploymentByName(t *testing.T) {
 
 func TestUpdateDeployment(t *testing.T) {
 	deployment := &extensions.Deployment{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "armor-test",
 			Name:      "foo",
 		},
@@ -693,7 +693,7 @@ func TestUpdateDeployment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deployment, err := client.Extensions().Deployments("armor-test").Get("foo")
+	deployment, err := client.Extensions().Deployments("armor-test").Get("foo", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -713,7 +713,7 @@ func TestUpdateDeployment(t *testing.T) {
 
 func TestUpdateDaemonSetByName(t *testing.T) {
 	daemonSet := &extensions.DaemonSet{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "armor-test",
 			Name:      "foo",
 		},
@@ -733,7 +733,7 @@ func TestUpdateDaemonSetByName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	daemonSet, err = client.Extensions().DaemonSets("armor-test").Get(daemonSet.Name)
+	daemonSet, err = client.Extensions().DaemonSets("armor-test").Get(daemonSet.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -753,7 +753,7 @@ func TestUpdateDaemonSetByName(t *testing.T) {
 
 func TestUpdateDaemonSet(t *testing.T) {
 	daemonSet := &extensions.DaemonSet{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "armor-test",
 			Name:      "foo",
 		},
@@ -773,7 +773,7 @@ func TestUpdateDaemonSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	daemonSet, err = client.Extensions().DaemonSets("armor-test").Get(daemonSet.Name)
+	daemonSet, err = client.Extensions().DaemonSets("armor-test").Get(daemonSet.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -791,92 +791,9 @@ func TestUpdateDaemonSet(t *testing.T) {
 	}
 }
 
-func TestUpdatePodsByLabelSelector(t *testing.T) {
-	config := &armor.Armor{}
-
-	labelSet := labels.Set{
-		"app": "armor",
-	}
-
-	fixtures := []*v1.Pod{
-		// should be removed
-		{
-			ObjectMeta: v1.ObjectMeta{
-				Namespace: "armor-test",
-				Name:      "foo",
-				Labels:    labelSet,
-			},
-		},
-
-		// should not be removed: different namespace
-		{
-			ObjectMeta: v1.ObjectMeta{
-				Namespace: "armor",
-				Name:      "bar",
-				Labels:    labelSet,
-			},
-		},
-
-		// should not be removed: doesn't match labels
-		{
-			ObjectMeta: v1.ObjectMeta{
-				Namespace: "armor-test",
-				Name:      "qux",
-			},
-		},
-
-		// should not be removed: config up to date
-		{
-			ObjectMeta: v1.ObjectMeta{
-				Namespace: "armor-test",
-				Name:      "waldo",
-				Labels:    labelSet,
-				Annotations: map[string]string{
-					"armor.labstack.com/configHash": getConfigHash(config),
-				},
-			},
-		},
-	}
-
-	client := fake.NewSimpleClientset()
-
-	for _, fixture := range fixtures {
-		if _, err := client.Core().Pods(fixture.Namespace).Create(fixture); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	controller := NewController(client)
-
-	if err := controller.UpdatePodsByLabelSelector("armor-test", labels.SelectorFromSet(labelSet), config); err != nil {
-		t.Fatal(err)
-	}
-
-	pods, err := client.Core().Pods(v1.NamespaceAll).List(v1.ListOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(pods.Items) != 3 {
-		t.Fatalf("expected 3, got %d", len(pods.Items))
-	}
-
-	if pods.Items[0].Name != "bar" {
-		t.Errorf("expected bar, got %#v", pods.Items[0].Name)
-	}
-
-	if pods.Items[1].Name != "qux" {
-		t.Errorf("expected qux, got %#v", pods.Items[1].Name)
-	}
-
-	if pods.Items[2].Name != "waldo" {
-		t.Errorf("expected waldo, got %#v", pods.Items[2].Name)
-	}
-}
-
 func TestGetNodeIPs(t *testing.T) {
 	node := &v1.Node{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name: "foo",
 		},
 		Status: v1.NodeStatus{
@@ -902,6 +819,203 @@ func TestGetNodeIPs(t *testing.T) {
 	controller := NewController(client)
 
 	nodeIPs, err := controller.GetNodeIPs()
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(nodeIPs) != 1 {
+		t.Fatalf("expected 1, got %d", len(nodeIPs))
+	}
+
+	if nodeIPs[0] != "54.10.11.12" {
+		t.Errorf("expected 54.10.11.12, got %#v", nodeIPs[0])
+	}
+}
+
+func TestGetNodeNamesByPodLabelSelector(t *testing.T) {
+	nodes := []*v1.Node{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "foo",
+			},
+			Status: v1.NodeStatus{
+				Addresses: []v1.NodeAddress{
+					{
+						Type:    v1.NodeExternalIP,
+						Address: "8.8.8.8",
+					},
+				},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "bar",
+			},
+			Status: v1.NodeStatus{
+				Addresses: []v1.NodeAddress{
+					{
+						Type:    v1.NodeExternalIP,
+						Address: "8.8.4.4",
+					},
+				},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "baz",
+			},
+			Status: v1.NodeStatus{
+				Addresses: []v1.NodeAddress{
+					{
+						Type:    v1.NodeExternalIP,
+						Address: "1.2.3.4",
+					},
+				},
+			},
+		},
+	}
+
+	labelSet := labels.Set{
+		"app": "armor",
+	}
+
+	fixtures := []*v1.Pod{
+		// should be included
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "armor-test",
+				Name:      "foo",
+				Labels:    labelSet,
+			},
+			Spec: v1.PodSpec{
+				NodeName: nodes[0].Name,
+			},
+		},
+
+		// should not be included: different namespace
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "armor",
+				Name:      "bar",
+				Labels:    labelSet,
+			},
+			Spec: v1.PodSpec{
+				NodeName: nodes[1].Name,
+			},
+		},
+
+		// should not be included: doesn't match labels
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "armor-test",
+				Name:      "qux",
+			},
+			Spec: v1.PodSpec{
+				NodeName: nodes[2].Name,
+			},
+		},
+
+		// should not be included: duplicate
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "armor-test",
+				Name:      "waldo",
+				Labels:    labelSet,
+			},
+			Spec: v1.PodSpec{
+				NodeName: nodes[0].Name,
+			},
+		},
+
+		// should not be included: no assigned node
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "armor-test",
+				Name:      "quux",
+				Labels:    labelSet,
+			},
+		},
+	}
+
+	client := fake.NewSimpleClientset()
+
+	for _, node := range nodes {
+		if _, err := client.Core().Nodes().Create(node); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, fixture := range fixtures {
+		if _, err := client.Core().Pods(fixture.Namespace).Create(fixture); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	controller := NewController(client)
+
+	nodeNames, err := controller.GetNodeNamesByPodLabelSelector("armor-test", labels.SelectorFromSet(labelSet))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(nodeNames) != 1 {
+		t.Fatalf("expected 1, got %d", len(nodeNames))
+	}
+
+	if nodeNames[0] != "foo" {
+		t.Errorf("expected foo, got %#v", nodeNames[0])
+	}
+}
+
+func TestGetExternalNodeIPsByNodeNames(t *testing.T) {
+	// should match but only external IP
+	node1 := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "foo",
+		},
+		Status: v1.NodeStatus{
+			Addresses: []v1.NodeAddress{
+				{
+					Type:    v1.NodeExternalIP,
+					Address: "54.10.11.12",
+				},
+				{
+					Type:    v1.NodeInternalIP,
+					Address: "10.0.1.1",
+				},
+			},
+		},
+	}
+
+	// should not match because name is not in list
+	node2 := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "bar",
+		},
+		Status: v1.NodeStatus{
+			Addresses: []v1.NodeAddress{
+				{
+					Type:    v1.NodeExternalIP,
+					Address: "1.2.3.4",
+				},
+			},
+		},
+	}
+
+	client := fake.NewSimpleClientset()
+
+	if _, err := client.Core().Nodes().Create(node1); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := client.Core().Nodes().Create(node2); err != nil {
+		t.Fatal(err)
+	}
+
+	controller := NewController(client)
+
+	nodeIPs, err := controller.GetExternalNodeIPsByNodeNames([]string{"foo", "qux"})
 
 	if err != nil {
 		t.Fatal(err)
