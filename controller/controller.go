@@ -270,7 +270,6 @@ func (c *Controller) UpdateDaemonSetByName(namespace string, daemonSetName strin
 // pods will correspond to the new template spec.
 //
 // TODO(linki): tests with different namespace don't fail ??
-// TODO(linki): pods do not get updated correctly
 func (c *Controller) UpdateDaemonSet(daemonSet *extensions.DaemonSet, config *armor.Armor) (*extensions.DaemonSet, error) {
 	configHash := getConfigHash(config)
 
@@ -294,31 +293,6 @@ func (c *Controller) UpdateDaemonSet(daemonSet *extensions.DaemonSet, config *ar
 	return daemonSet, nil
 }
 
-// UpdatePodsByLabelSelector deletes all pods matching a provided label selector
-// that are not annotated with the hash of the passed in config.
-// When passed the label selector of a DaemonSet this can be used to force the
-// pods to be updated.
-func (c *Controller) UpdatePodsByLabelSelector(namespace string, selector labels.Selector, config *armor.Armor) error {
-	configHash := getConfigHash(config)
-
-	listOptions := metav1.ListOptions{LabelSelector: selector.String()}
-
-	pods, err := c.Client.Core().Pods(namespace).List(listOptions)
-	if err != nil {
-		return err
-	}
-
-	for _, pod := range pods.Items {
-		if pod.Annotations[configHashAnnotationKey] != configHash {
-			if err := c.Client.Core().Pods(pod.Namespace).Delete(pod.Name, nil); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
 // GetNodeIPs returns the public IPs of all nodes in the cluster.
 func (c *Controller) GetNodeIPs() ([]string, error) {
 	nodeIPs := []string{}
@@ -337,6 +311,60 @@ func (c *Controller) GetNodeIPs() ([]string, error) {
 	}
 
 	return nodeIPs, nil
+}
+
+// GetExternalNodeIPsByNodeNames returns the public IPs of the nodes given by the provided list of
+// node names.
+func (c *Controller) GetExternalNodeIPsByNodeNames(nodeNames []string) ([]string, error) {
+	nodeIPs := []string{}
+	nodeNameSet := map[string]interface{}{}
+
+	for _, nodeName := range nodeNames {
+		nodeNameSet[nodeName] = true
+	}
+
+	nodes, err := c.Client.Core().Nodes().List(metav1.ListOptions{})
+	if err != nil {
+		return nodeIPs, err
+	}
+
+	for _, node := range nodes.Items {
+		if _, ok := nodeNameSet[node.Name]; ok {
+			for _, address := range node.Status.Addresses {
+				if address.Type == v1.NodeExternalIP {
+					nodeIPs = append(nodeIPs, address.Address)
+				}
+			}
+		}
+	}
+
+	return nodeIPs, nil
+}
+
+// GetNodeNamesByPodLabelSelector returns the node names where a set of pods defined by a label
+// selector are scheduled.
+func (c *Controller) GetNodeNamesByPodLabelSelector(namespace string, selector labels.Selector) ([]string, error) {
+	nodeNames := []string{}
+	nodeNameSet := map[string]interface{}{}
+
+	listOptions := metav1.ListOptions{LabelSelector: selector.String()}
+
+	pods, err := c.Client.Core().Pods(namespace).List(listOptions)
+	if err != nil {
+		return nodeNames, err
+	}
+
+	for _, pod := range pods.Items {
+		if pod.Spec.NodeName != "" {
+			nodeNameSet[pod.Spec.NodeName] = true
+		}
+	}
+
+	for k := range nodeNameSet {
+		nodeNames = append(nodeNames, k)
+	}
+
+	return nodeNames, nil
 }
 
 // getConfigHash returns the hash value of the passed in config.

@@ -791,89 +791,6 @@ func TestUpdateDaemonSet(t *testing.T) {
 	}
 }
 
-func TestUpdatePodsByLabelSelector(t *testing.T) {
-	config := &armor.Armor{}
-
-	labelSet := labels.Set{
-		"app": "armor",
-	}
-
-	fixtures := []*v1.Pod{
-		// should be removed
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "armor-test",
-				Name:      "foo",
-				Labels:    labelSet,
-			},
-		},
-
-		// should not be removed: different namespace
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "armor",
-				Name:      "bar",
-				Labels:    labelSet,
-			},
-		},
-
-		// should not be removed: doesn't match labels
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "armor-test",
-				Name:      "qux",
-			},
-		},
-
-		// should not be removed: config up to date
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "armor-test",
-				Name:      "waldo",
-				Labels:    labelSet,
-				Annotations: map[string]string{
-					"armor.labstack.com/configHash": getConfigHash(config),
-				},
-			},
-		},
-	}
-
-	client := fake.NewSimpleClientset()
-
-	for _, fixture := range fixtures {
-		if _, err := client.Core().Pods(fixture.Namespace).Create(fixture); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	controller := NewController(client)
-
-	if err := controller.UpdatePodsByLabelSelector("armor-test", labels.SelectorFromSet(labelSet), config); err != nil {
-		t.Fatal(err)
-	}
-
-	pods, err := client.Core().Pods(v1.NamespaceAll).List(metav1.ListOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(pods.Items) != 3 {
-		t.Fatalf("expected 3, got %d", len(pods.Items))
-	}
-
-	if pods.Items[0].Name != "bar" {
-		t.Errorf("expected bar, got %#v", pods.Items[0].Name)
-	}
-
-	if pods.Items[1].Name != "qux" {
-		t.Errorf("expected qux, got %#v", pods.Items[1].Name)
-	}
-
-	if pods.Items[2].Name != "waldo" {
-		t.Errorf("expected waldo, got %#v", pods.Items[2].Name)
-	}
-}
-
 func TestGetNodeIPs(t *testing.T) {
 	node := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -902,6 +819,203 @@ func TestGetNodeIPs(t *testing.T) {
 	controller := NewController(client)
 
 	nodeIPs, err := controller.GetNodeIPs()
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(nodeIPs) != 1 {
+		t.Fatalf("expected 1, got %d", len(nodeIPs))
+	}
+
+	if nodeIPs[0] != "54.10.11.12" {
+		t.Errorf("expected 54.10.11.12, got %#v", nodeIPs[0])
+	}
+}
+
+func TestGetNodeNamesByPodLabelSelector(t *testing.T) {
+	nodes := []*v1.Node{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "foo",
+			},
+			Status: v1.NodeStatus{
+				Addresses: []v1.NodeAddress{
+					{
+						Type:    v1.NodeExternalIP,
+						Address: "8.8.8.8",
+					},
+				},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "bar",
+			},
+			Status: v1.NodeStatus{
+				Addresses: []v1.NodeAddress{
+					{
+						Type:    v1.NodeExternalIP,
+						Address: "8.8.4.4",
+					},
+				},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "baz",
+			},
+			Status: v1.NodeStatus{
+				Addresses: []v1.NodeAddress{
+					{
+						Type:    v1.NodeExternalIP,
+						Address: "1.2.3.4",
+					},
+				},
+			},
+		},
+	}
+
+	labelSet := labels.Set{
+		"app": "armor",
+	}
+
+	fixtures := []*v1.Pod{
+		// should be included
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "armor-test",
+				Name:      "foo",
+				Labels:    labelSet,
+			},
+			Spec: v1.PodSpec{
+				NodeName: nodes[0].Name,
+			},
+		},
+
+		// should not be included: different namespace
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "armor",
+				Name:      "bar",
+				Labels:    labelSet,
+			},
+			Spec: v1.PodSpec{
+				NodeName: nodes[1].Name,
+			},
+		},
+
+		// should not be included: doesn't match labels
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "armor-test",
+				Name:      "qux",
+			},
+			Spec: v1.PodSpec{
+				NodeName: nodes[2].Name,
+			},
+		},
+
+		// should not be included: duplicate
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "armor-test",
+				Name:      "waldo",
+				Labels:    labelSet,
+			},
+			Spec: v1.PodSpec{
+				NodeName: nodes[0].Name,
+			},
+		},
+
+		// should not be included: no assigned node
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "armor-test",
+				Name:      "quux",
+				Labels:    labelSet,
+			},
+		},
+	}
+
+	client := fake.NewSimpleClientset()
+
+	for _, node := range nodes {
+		if _, err := client.Core().Nodes().Create(node); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, fixture := range fixtures {
+		if _, err := client.Core().Pods(fixture.Namespace).Create(fixture); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	controller := NewController(client)
+
+	nodeNames, err := controller.GetNodeNamesByPodLabelSelector("armor-test", labels.SelectorFromSet(labelSet))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(nodeNames) != 1 {
+		t.Fatalf("expected 1, got %d", len(nodeNames))
+	}
+
+	if nodeNames[0] != "foo" {
+		t.Errorf("expected foo, got %#v", nodeNames[0])
+	}
+}
+
+func TestGetExternalNodeIPsByNodeNames(t *testing.T) {
+	// should match but only external IP
+	node1 := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "foo",
+		},
+		Status: v1.NodeStatus{
+			Addresses: []v1.NodeAddress{
+				{
+					Type:    v1.NodeExternalIP,
+					Address: "54.10.11.12",
+				},
+				{
+					Type:    v1.NodeInternalIP,
+					Address: "10.0.1.1",
+				},
+			},
+		},
+	}
+
+	// should not match because name is not in list
+	node2 := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "bar",
+		},
+		Status: v1.NodeStatus{
+			Addresses: []v1.NodeAddress{
+				{
+					Type:    v1.NodeExternalIP,
+					Address: "1.2.3.4",
+				},
+			},
+		},
+	}
+
+	client := fake.NewSimpleClientset()
+
+	if _, err := client.Core().Nodes().Create(node1); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := client.Core().Nodes().Create(node2); err != nil {
+		t.Fatal(err)
+	}
+
+	controller := NewController(client)
+
+	nodeIPs, err := controller.GetExternalNodeIPsByNodeNames([]string{"foo", "qux"})
 
 	if err != nil {
 		t.Fatal(err)

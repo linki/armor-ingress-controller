@@ -4,6 +4,8 @@ metadata:
   name: armor
   namespace: kube-system
 spec:
+  updateStrategy:
+    type: RollingUpdate
   template:
     metadata:
       labels:

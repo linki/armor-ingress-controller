@@ -102,20 +102,24 @@ func main() {
 			log.Fatal(err)
 		}
 
-		// Force all members of the DaemonSet to be recreated to apply the new config.
+		// Create a label selector that matches all Armor pods.
 		labelSet := labels.Set(daemonSet.Spec.Selector.MatchLabels)
 
-		if err = controller.UpdatePodsByLabelSelector(namespace, labelSet.AsSelector(), config); err != nil {
-			log.Fatal(err)
-		}
-
-		// Get the public IPs of all nodes.
-		ingressIPs, err := controller.GetNodeIPs()
+		// Find the names of all nodes running at least one Armor pod.
+		nodeNames, err := controller.GetNodeNamesByPodLabelSelector(namespace, labelSet.AsSelector())
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		// Update all Ingress objects with the public IPs of all nodes.
+		// Get the public IPs of all found nodes.
+		ingressIPs, err := controller.GetExternalNodeIPsByNodeNames(nodeNames)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Update all Ingress objects with the public IPs of all nodes running an Armor pod.
+		//
+		// TODO: Limit this to only those with our ingress.class
 		if err := controller.UpdateIngressLoadBalancers(ingresses, ingressIPs...); err != nil {
 			log.Fatal(err)
 		}
