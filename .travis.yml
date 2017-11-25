@@ -9,8 +9,12 @@ go:
 - 1.9
 - tip
 
-install:
+before_install:
+- go get github.com/Masterminds/glide
 - go get github.com/mattn/goveralls
+
+install:
+- glide install --strip-vendor
 
 script:
 - goveralls -service=travis-ci
