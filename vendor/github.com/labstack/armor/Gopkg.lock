@@ -14,6 +14,12 @@
   version = "v1.1.0"
 
 [[projects]]
+  name = "github.com/dghubble/sling"
+  packages = ["."]
+  revision = "eb56e89ac5088bebb12eef3cb4b293300f43608b"
+  version = "v1.1.0"
+
+[[projects]]
   name = "github.com/dgrijalva/jwt-go"
   packages = ["."]
   revision = "d2709f9f1f31ebcda9651b03077758c1f3a0018c"
@@ -29,19 +35,25 @@
   branch = "master"
   name = "github.com/golang/protobuf"
   packages = ["proto"]
-  revision = "5a0f697c9ed9d68fef0116532c6e05cfeae00e55"
+  revision = "6a1fa9404c0aebf36c879bc50152edcc953910d2"
 
 [[projects]]
-  name = "github.com/labstack/cube"
-  packages = ["go/cube"]
-  revision = "d7cc6f2db3dee905d52ef4377cfc106fa324927f"
-  version = "v0.0.3"
+  branch = "master"
+  name = "github.com/google/go-querystring"
+  packages = ["query"]
+  revision = "53e6ce116135b80d037921a7fdd5138cf32d7a8a"
 
 [[projects]]
   branch = "master"
   name = "github.com/labstack/echo"
   packages = [".","middleware"]
-  revision = "3fafadf89554d7fbb4d04c075de4ca4fcf113c55"
+  revision = "ee85b46a0539c3a516dc68374d49eff8b04573de"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/labstack/echo-contrib"
+  packages = ["cube"]
+  revision = "76f965b699df550df5360c3aaa9f45a13d6fc89a"
 
 [[projects]]
   name = "github.com/labstack/gommon"
@@ -50,10 +62,16 @@
   version = "v0.2.1"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/labstack/labstack-go"
+  packages = ["."]
+  revision = "ee88fb4d47cc0451bbc309f42ce2339f1a09d448"
+
+[[projects]]
   name = "github.com/mattn/go-colorable"
   packages = ["."]
-  revision = "d228849504861217f796da67fae4f6e347643f15"
-  version = "v0.0.7"
+  revision = "941b50ebc6efddf4c41c8e4537a5f68a4e686b24"
+  version = "v0.0.8"
 
 [[projects]]
   name = "github.com/mattn/go-isatty"
@@ -101,17 +119,17 @@
   branch = "master"
   name = "golang.org/x/crypto"
   packages = ["acme","acme/autocert"]
-  revision = "e7ba82683099cae71475961448ab8f903ea77c26"
+  revision = "5ef0053f77724838734b6945dd364d3847e5de1d"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix"]
-  revision = "0b25a408a50076fbbcae6b7ac0ea5fbb0b085e79"
+  revision = "4ed4d404df456f81e878683a0363ed3013a59003"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "9b45130bb0b912ce5df9a140af88dc7763d7b912daa70e01cd9f1abaf7a7431d"
+  inputs-digest = "7c09a4ae2f48a3bbd03921ce657c1c231d94eabf91d98581fa32a2957eadeb75"
   solver-name = "gps-cdcl"
   solver-version = 1

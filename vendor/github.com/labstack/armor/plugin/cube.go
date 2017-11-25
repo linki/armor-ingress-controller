@@ -1,8 +1,8 @@
 package plugin
 
 import (
-	"github.com/labstack/cube/go/cube"
 	"github.com/labstack/echo"
+	"github.com/labstack/echo-contrib/cube"
 )
 
 type (
@@ -13,7 +13,7 @@ type (
 )
 
 func (c *Cube) Init() (err error) {
-	c.Middleware = cube.MiddlewareEcho(c.Config)
+	c.Middleware = cube.MiddlewareWithConfig(c.Config)
 	return
 }
 

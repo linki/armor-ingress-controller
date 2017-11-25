@@ -1,23 +1,25 @@
 package: github.com/linki/armor-ingress-controller
 import:
 - package: github.com/labstack/armor
-  version: ~0.2.12
+  version: ~0.3.3
 - package: github.com/mitchellh/hashstructure
 - package: github.com/sirupsen/logrus
   version: ~1.0.3
 - package: gopkg.in/alecthomas/kingpin.v2
   version: ~2.2.5
+- package: k8s.io/api
+  subpackages:
+  - core/v1
+  - extensions/v1beta1
 - package: k8s.io/apimachinery
   subpackages:
   - pkg/api/errors
   - pkg/apis/meta/v1
   - pkg/labels
 - package: k8s.io/client-go
-  version: ~4.0.0
+  version: ~5.0.1
   subpackages:
   - kubernetes
-  - pkg/api/v1
-  - pkg/apis/extensions
   - plugin/pkg/client/auth
   - rest
   - tools/clientcmd
