@@ -13,7 +13,7 @@ spec:
     spec:
       containers:
       - name: armor
-        image: labstack/armor:0.2.12
+        image: labstack/armor:0.3.3
         args:
         - -c
         - /etc/armor/armor.json
