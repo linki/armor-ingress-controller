@@ -44,17 +44,17 @@ func NewController(client kubernetes.Interface) *Controller {
 
 // GetIngresses returns a slice of all Ingress objects that are annotated with
 // this controller's annotation identifier.
-func (c *Controller) GetIngresses() ([]extensions.Ingress, error) {
+func (c *Controller) GetIngresses() ([]*extensions.Ingress, error) {
 	ingressList, err := c.Client.Extensions().Ingresses(v1.NamespaceAll).List(metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
 
-	ingresses := []extensions.Ingress{}
+	ingresses := []*extensions.Ingress{}
 
-	for _, ingress := range ingressList.Items {
+	for i, ingress := range ingressList.Items {
 		if ingress.Annotations[ingressClassAnnotationKey] == ingressClassAnnotationValue {
-			ingresses = append(ingresses, ingress)
+			ingresses = append(ingresses, &ingressList.Items[i])
 		}
 	}
 
@@ -63,7 +63,7 @@ func (c *Controller) GetIngresses() ([]extensions.Ingress, error) {
 
 // UpdateIngressLoadBalancers takes a slice of Ingress objects and updates the
 // Status.LoadBalancer section with the given IPs.
-func (c *Controller) UpdateIngressLoadBalancers(ingresses []extensions.Ingress, IPs ...string) error {
+func (c *Controller) UpdateIngressLoadBalancers(ingresses []*extensions.Ingress, IPs []string) error {
 	loadBalancers := make([]v1.LoadBalancerIngress, 0, len(IPs))
 
 	for _, ip := range IPs {
@@ -73,7 +73,7 @@ func (c *Controller) UpdateIngressLoadBalancers(ingresses []extensions.Ingress, 
 	for _, ingress := range ingresses {
 		ingress.Status.LoadBalancer.Ingress = loadBalancers
 
-		if _, err := c.Client.Extensions().Ingresses(ingress.Namespace).UpdateStatus(&ingress); err != nil {
+		if _, err := c.Client.Extensions().Ingresses(ingress.Namespace).UpdateStatus(ingress); err != nil {
 			return err
 		}
 	}
@@ -84,7 +84,7 @@ func (c *Controller) UpdateIngressLoadBalancers(ingresses []extensions.Ingress, 
 // GenerateConfig receives a list of Ingress objects and generates a
 // corresponding Armor config from it. It also sets up some default plugins and
 // enables automatic TLS certificate retrieval from Let's Encrypt.
-func (c *Controller) GenerateConfig(ingresses ...extensions.Ingress) (*armor.Armor, error) {
+func (c *Controller) GenerateConfig(ingresses []*extensions.Ingress) (*armor.Armor, error) {
 	config := &armor.Armor{
 		Hosts: make(map[string]*armor.Host),
 	}

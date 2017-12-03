@@ -81,7 +81,7 @@ func main() {
 		}
 
 		// generate an Armor config from the ingress list.
-		config, err := controller.GenerateConfig(ingresses...)
+		config, err := controller.GenerateConfig(ingresses)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -120,7 +120,7 @@ func main() {
 		// Update all Ingress objects with the public IPs of all nodes running an Armor pod.
 		//
 		// TODO: Limit this to only those with our ingress.class
-		if err := controller.UpdateIngressLoadBalancers(ingresses, ingressIPs...); err != nil {
+		if err := controller.UpdateIngressLoadBalancers(ingresses, ingressIPs); err != nil {
 			log.Fatal(err)
 		}
 

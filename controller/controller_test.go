@@ -12,10 +12,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	testNamespace = "armor-test"
 )
 
 func TestNew(t *testing.T) {
@@ -26,158 +31,89 @@ func TestNew(t *testing.T) {
 }
 
 func TestGetIngresses(t *testing.T) {
-	fixtures := []*extensions.Ingress{
+	controller, _ := newTestController(t, []*extensions.Ingress{
 		// main object under test
 		{
 			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "armor-test",
 				Name:      "foo",
+				Namespace: testNamespace,
 				Annotations: map[string]string{
 					"kubernetes.io/ingress.class": "armor",
 				},
 			},
 		},
-
-		// supports multiple ingresses
+		// test that it supports multiple ingresses
 		{
 			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "armor-test",
 				Name:      "bar",
+				Namespace: testNamespace,
 				Annotations: map[string]string{
 					"kubernetes.io/ingress.class": "armor",
 				},
 			},
 		},
-
-		// filtered out by annotation
+		// should be filtered out by annotation
 		{
 			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "armor-test",
 				Name:      "baz",
+				Namespace: testNamespace,
 			},
 		},
-	}
-
-	client := fake.NewSimpleClientset()
-
-	for _, fixture := range fixtures {
-		_, err := client.Extensions().Ingresses("armor-test").Create(fixture)
-		require.NoError(t, err)
-	}
-
-	controller := NewController(client)
+	})
 
 	ingresses, err := controller.GetIngresses()
 	assert.NoError(t, err)
 
-	if len(ingresses) != 2 {
-		t.Fatalf("expected 2, got %d", len(ingresses))
-	}
-
-	// TODO(linki): make tests independent of ordering
-	ingress := ingresses[0]
-
-	if ingress.Name != "foo" {
-		t.Errorf("expected foo, got %s", ingress.Name)
-	}
-
-	if ingress.Namespace != "armor-test" {
-		t.Errorf("expected default, got %s", ingress.Namespace)
-	}
-
-	ingress = ingresses[1]
-
-	if ingress.Name != "bar" {
-		t.Errorf("expected bar, got %s", ingress.Name)
-	}
-
-	if ingress.Namespace != "armor-test" {
-		t.Errorf("expected armor, got %s", ingress.Namespace)
-	}
+	assertIngresses(t, ingresses, []map[string]string{
+		{"name": "foo", "namespace": testNamespace},
+		{"name": "bar", "namespace": testNamespace},
+	})
 }
 
 func TestUpdateIngressLoadBalancer(t *testing.T) {
-	fixtures := []extensions.Ingress{
-		// main object under test
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "armor-test",
-				Name:      "foo",
-			},
-		},
-
-		// supports multiple ingresses
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "armor-test",
-				Name:      "bar",
-			},
+	foo := &extensions.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      "foo",
 		},
 	}
 
-	client := fake.NewSimpleClientset()
-
-	for _, fixture := range fixtures {
-		_, err := client.Extensions().Ingresses("armor-test").Create(&fixture)
-		require.NoError(t, err)
+	bar := &extensions.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      "bar",
+		},
 	}
 
-	controller := NewController(client)
+	for _, ti := range []struct {
+		title         string
+		ingresses     []*extensions.Ingress
+		loadBalancers []string
+	}{
+		{
+			title:         "it updates multiple ingresses with multiple IPs",
+			ingresses:     []*extensions.Ingress{foo, bar},
+			loadBalancers: []string{"8.8.8.8", "8.8.4.4"},
+		},
+	} {
+		t.Run(ti.title, func(t *testing.T) {
+			controller, client := newTestController(t, ti.ingresses)
 
-	err := controller.UpdateIngressLoadBalancers(fixtures, "8.8.8.8", "8.8.4.4")
-	assert.NoError(t, err)
+			err := controller.UpdateIngressLoadBalancers(ti.ingresses, ti.loadBalancers)
+			assert.NoError(t, err)
 
-	// check first one
+			for _, ing := range ti.ingresses {
+				ingress, err := client.Extensions().Ingresses(ing.Namespace).Get(ing.Name, metav1.GetOptions{})
+				require.NoError(t, err)
 
-	ingress, err := client.Extensions().Ingresses("armor-test").Get("foo", metav1.GetOptions{})
-	require.NoError(t, err)
-
-	loadBalancerIPs := ingress.Status.LoadBalancer.Ingress
-
-	if len(loadBalancerIPs) != 2 {
-		t.Fatalf("expected 2, got %d", len(loadBalancerIPs))
-	}
-
-	// TODO(linki): make tests independent of ordering
-	loadBalancerIP := loadBalancerIPs[0]
-
-	if loadBalancerIP.IP != "8.8.8.8" {
-		t.Errorf("expected 8.8.8.8, got %s", loadBalancerIP.IP)
-	}
-
-	loadBalancerIP = loadBalancerIPs[1]
-
-	if loadBalancerIP.IP != "8.8.4.4" {
-		t.Errorf("expected 8.8.4.4, got %s", loadBalancerIP.IP)
-	}
-
-	// check second one
-
-	ingress, err = client.Extensions().Ingresses("armor-test").Get("bar", metav1.GetOptions{})
-	require.NoError(t, err)
-
-	loadBalancerIPs = ingress.Status.LoadBalancer.Ingress
-
-	if len(loadBalancerIPs) != 2 {
-		t.Fatalf("expected 2, got %d", len(loadBalancerIPs))
-	}
-
-	// TODO(linki): make tests independent of ordering
-	loadBalancerIP = loadBalancerIPs[0]
-
-	if loadBalancerIP.IP != "8.8.8.8" {
-		t.Errorf("expected 8.8.8.8, got %s", loadBalancerIP.IP)
-	}
-
-	loadBalancerIP = loadBalancerIPs[1]
-
-	if loadBalancerIP.IP != "8.8.4.4" {
-		t.Errorf("expected 8.8.4.4, got %s", loadBalancerIP.IP)
+				assertLoadBalancerIPs(t, ingress, ti.loadBalancers)
+			}
+		})
 	}
 }
 
 func TestGenerateConfig(t *testing.T) {
-	fixtures := []extensions.Ingress{
+	fixtures := []*extensions.Ingress{
 		// main object under test
 		{
 			ObjectMeta: metav1.ObjectMeta{
@@ -300,183 +236,101 @@ func TestGenerateConfig(t *testing.T) {
 
 	controller := NewController(client)
 
-	config, err := controller.GenerateConfig(fixtures...)
+	config, err := controller.GenerateConfig(fixtures)
 	require.NoError(t, err)
 
-	if len(config.Hosts) != 3 {
-		t.Fatalf("expected 3, got %d", len(config.Hosts))
-	}
-
-	if _, exists := config.Hosts["foo.bar.com"]; !exists {
-		t.Errorf("expected something, got nothing")
-	}
-
-	if _, exists := config.Hosts["waldo.fred.com"]; !exists {
-		t.Errorf("expected something, got nothing")
-	}
-
-	if _, exists := config.Hosts["qux.quux.com"]; !exists {
-		t.Errorf("expected something, got nothing")
-	}
+	// TODO(linki): omit waldo entirely?
+	require.Len(t, config.Hosts, 3)
 
 	// test foo
 
+	require.Contains(t, config.Hosts, "foo.bar.com")
 	foo := config.Hosts["foo.bar.com"]
-
-	if len(foo.Plugins) != 1 {
-		t.Fatalf("expected 1, got %d", len(foo.Plugins))
-	}
-
+	require.Len(t, foo.Plugins, 1)
 	proxy := foo.Plugins[0]
-
-	if _, exists := proxy["name"]; !exists {
-		t.Fatalf("expected something, got nothing")
-	}
-
-	if _, exists := proxy["targets"]; !exists {
-		t.Fatalf("expected something, got nothing")
-	}
-
-	if proxy["name"].(string) != "proxy" {
-		t.Fatalf("expected proxy, got %#v", proxy["name"])
-	}
-
+	assert.Equal(t, "proxy", proxy["name"])
 	targets := proxy["targets"].([]map[string]string)
+	require.Len(t, targets, 2)
+	assert.Equal(t, "http://8.8.8.8:80", targets[0]["url"])
+	assert.Equal(t, "http://8.8.4.4:8080", targets[1]["url"])
 
-	if len(targets) != 2 {
-		t.Fatalf("expected 2, got %d", len(targets))
-	}
+	// test waldo
 
-	expected := "http://8.8.8.8:80"
-
-	// TODO(linki): make tests independent of ordering
-	if targets[0]["url"] != expected {
-		t.Fatalf("expected %s, got %#v", expected, targets[0]["url"])
-	}
-
-	expected = "http://8.8.4.4:8080"
-
-	if targets[1]["url"] != expected {
-		t.Fatalf("expected %s, got %#v", expected, targets[0]["url"])
-	}
-
-	// TODO(linki): test waldo
+	// TODO(linki): omit the hostname entirely?
+	require.Contains(t, config.Hosts, "waldo.fred.com")
+	waldo := config.Hosts["waldo.fred.com"]
+	require.Len(t, waldo.Plugins, 1)
+	proxy = waldo.Plugins[0]
+	assert.Equal(t, "proxy", proxy["name"])
+	targets = proxy["targets"].([]map[string]string)
+	require.Len(t, targets, 0)
 
 	// test qux
 
+	require.Contains(t, config.Hosts, "qux.quux.com")
 	qux := config.Hosts["qux.quux.com"]
-
-	if len(qux.Plugins) != 1 {
-		t.Fatalf("expected 1, got %d", len(qux.Plugins))
-	}
-
+	require.Len(t, qux.Plugins, 1)
 	proxy = qux.Plugins[0]
-
-	if _, exists := proxy["name"]; !exists {
-		t.Fatalf("expected something, got nothing")
-	}
-
-	if _, exists := proxy["targets"]; !exists {
-		t.Fatalf("expected something, got nothing")
-	}
-
-	if proxy["name"].(string) != "proxy" {
-		t.Fatalf("expected proxy, got %#v", proxy["name"])
-	}
-
+	assert.Equal(t, "proxy", proxy["name"])
 	targets = proxy["targets"].([]map[string]string)
-
-	if len(targets) != 1 {
-		t.Fatalf("expected 1, got %d", len(targets))
-	}
-
-	expected = "http://1.2.3.4:443"
-
-	if targets[0]["url"] != expected {
-		t.Fatalf("expected %s, got %#v", expected, targets[0]["url"])
-	}
+	require.Len(t, targets, 1)
+	assert.Equal(t, "http://1.2.3.4:443", targets[0]["url"])
 }
 
 func TestIncludeGlobalPlugins(t *testing.T) {
-	controller := NewController(fake.NewSimpleClientset())
+	controller, _ := newTestController(t, nil)
 
-	config, err := controller.GenerateConfig(extensions.Ingress{})
+	config, err := controller.GenerateConfig(nil)
 	require.NoError(t, err)
 
-	if len(config.Plugins) != 2 {
-		t.Fatalf("expected 2, got %d", len(config.Plugins))
+	plugins := []string{}
+	for _, plugin := range config.Plugins {
+		plugins = append(plugins, plugin["name"].(string))
 	}
 
-	var tests = []struct {
-		name string
-	}{
-		{"logger"},
-		{"https-redirect"},
-	}
+	assert.Len(t, plugins, 2)
 
-	for _, test := range tests {
-		included := false
-
-		for _, plugin := range config.Plugins {
-			if plugin["name"] == test.name {
-				included = true
-			}
-		}
-
-		if !included {
-			t.Errorf("plugin %s is missing", test.name)
-		}
-	}
+	assert.Contains(t, plugins, "logger")
+	assert.Contains(t, plugins, "https-redirect")
 }
 
 func TestSetupAutoTLS(t *testing.T) {
-	controller := NewController(fake.NewSimpleClientset())
+	controller, _ := newTestController(t, nil)
 
-	config, err := controller.GenerateConfig(extensions.Ingress{})
+	config, err := controller.GenerateConfig(nil)
 	require.NoError(t, err)
 
-	if config.TLS == nil {
-		t.Fatalf("TLS not configured.")
-	}
+	require.NotNil(t, config.TLS)
 
-	if config.TLS.Address != ":443" {
-		t.Errorf("TLS doesn't listen on :443.")
-	}
-
-	if !config.TLS.Auto {
-		t.Errorf("auto TLS not configured.")
-	}
-
-	if config.TLS.CacheDir != "/var/cache/armor" {
-		t.Errorf("expected /var/cache/armor, got %#v", config.TLS.CacheDir)
-	}
+	assert.True(t, config.TLS.Auto)
+	assert.Equal(t, ":443", config.TLS.Address)
+	assert.Equal(t, "/var/cache/armor", config.TLS.CacheDir)
 }
 
 func TestEnsureConfigMap(t *testing.T) {
-	client := fake.NewSimpleClientset()
-	controller := NewController(client)
+	controller, client := newTestController(t, nil)
 
-	err := controller.EnsureConfigMap("armor-test", "foo")
+	err := controller.EnsureConfigMap(testNamespace, "foo")
 	require.NoError(t, err)
 
-	_, err = client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{})
+	_, err = client.Core().ConfigMaps(testNamespace).Get("foo", metav1.GetOptions{})
 	require.NoError(t, err)
 
-	err = controller.EnsureConfigMap("armor-test", "foo")
+	err = controller.EnsureConfigMap(testNamespace, "foo")
 	require.NoError(t, err)
 }
 
 func TestWriteConfigToConfigMapByName(t *testing.T) {
 	configMap := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "armor-test",
+			Namespace: testNamespace,
 			Name:      "foo",
 		},
 	}
 
 	client := fake.NewSimpleClientset()
 
-	_, err := client.Core().ConfigMaps("armor-test").Create(configMap)
+	_, err := client.Core().ConfigMaps(testNamespace).Create(configMap)
 	require.NoError(t, err)
 
 	config := &armor.Armor{
@@ -489,40 +343,30 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 
 	controller := NewController(client)
 
-	err = controller.WriteConfigToConfigMapByName(config, "armor-test", "foo", "bar")
+	err = controller.WriteConfigToConfigMapByName(config, testNamespace, "foo", "bar")
 	require.NoError(t, err)
 
-	configMap, err = client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{})
+	configMap, err = client.Core().ConfigMaps(testNamespace).Get("foo", metav1.GetOptions{})
 	require.NoError(t, err)
 
 	configMapAnnotation := configMap.Annotations["armor.labstack.com/configHash"]
 
-	if configMapAnnotation != getConfigHash(config) {
-		t.Errorf("expected %#v, got %#v", getConfigHash(config), configMapAnnotation)
-	}
+	assert.Equal(t, getConfigHash(config), configMapAnnotation)
 
 	var loaded armor.Armor
 
 	err = yaml.Unmarshal([]byte(configMap.Data["bar"]), &loaded)
 	require.NoError(t, err)
 
-	if len(loaded.Hosts) != 1 {
-		t.Fatalf("expected 1, got %d", len(loaded.Hosts))
-	}
-
-	if _, exists := loaded.Hosts["foo"]; !exists {
-		t.Errorf("expected something, got nothing")
-	}
-
-	if loaded.Hosts["foo"].CertFile != "cert" {
-		t.Errorf("expected cert, got %#v", loaded.Hosts["foo"].CertFile)
-	}
+	require.Len(t, loaded.Hosts, 1)
+	require.NotNil(t, loaded.Hosts["foo"])
+	assert.Equal(t, "cert", loaded.Hosts["foo"].CertFile)
 }
 
 func TestWriteConfigToConfigMap(t *testing.T) {
 	configMap := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "armor-test",
+			Namespace: testNamespace,
 			Name:      "foo",
 		},
 		Data: map[string]string{
@@ -532,7 +376,7 @@ func TestWriteConfigToConfigMap(t *testing.T) {
 
 	client := fake.NewSimpleClientset()
 
-	_, err := client.Core().ConfigMaps("armor-test").Create(configMap)
+	_, err := client.Core().ConfigMaps(testNamespace).Create(configMap)
 	require.NoError(t, err)
 
 	config := &armor.Armor{
@@ -548,7 +392,7 @@ func TestWriteConfigToConfigMap(t *testing.T) {
 	err = controller.WriteConfigToConfigMap(config, configMap, "bar")
 	require.NoError(t, err)
 
-	configMap, err = client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{})
+	configMap, err = client.Core().ConfigMaps(testNamespace).Get("foo", metav1.GetOptions{})
 	require.NoError(t, err)
 
 	var loaded armor.Armor
@@ -556,17 +400,9 @@ func TestWriteConfigToConfigMap(t *testing.T) {
 	err = yaml.Unmarshal([]byte(configMap.Data["bar"]), &loaded)
 	require.NoError(t, err)
 
-	if len(loaded.Hosts) != 1 {
-		t.Fatalf("expected 1, got %d", len(loaded.Hosts))
-	}
-
-	if _, exists := loaded.Hosts["foo"]; !exists {
-		t.Errorf("expected something, got nothing")
-	}
-
-	if loaded.Hosts["foo"].CertFile != "cert" {
-		t.Fatalf("expected cert, got %#v", loaded.Hosts["foo"].CertFile)
-	}
+	require.Len(t, loaded.Hosts, 1)
+	require.NotNil(t, loaded.Hosts["foo"])
+	assert.Equal(t, "cert", loaded.Hosts["foo"].CertFile)
 }
 
 func TestWriteConfigToWriter(t *testing.T) {
@@ -590,65 +426,51 @@ func TestWriteConfigToWriter(t *testing.T) {
 	err = yaml.Unmarshal(buffer.Bytes(), &loaded)
 	require.NoError(t, err)
 
-	if len(loaded.Hosts) != 1 {
-		t.Fatalf("expected 1, got %d", len(loaded.Hosts))
-	}
-
-	if _, exists := loaded.Hosts["foo"]; !exists {
-		t.Errorf("expected something, got nothing")
-	}
-
-	if loaded.Hosts["foo"].CertFile != "cert" {
-		t.Fatalf("expected cert, got %#v", loaded.Hosts["foo"].CertFile)
-	}
+	require.Len(t, loaded.Hosts, 1)
+	require.NotNil(t, loaded.Hosts["foo"])
+	assert.Equal(t, "cert", loaded.Hosts["foo"].CertFile)
 }
 
 func TestUpdateDeploymentByName(t *testing.T) {
 	deployment := &extensions.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "armor-test",
+			Namespace: testNamespace,
 			Name:      "foo",
 		},
 	}
 
 	client := fake.NewSimpleClientset()
 
-	_, err := client.Extensions().Deployments("armor-test").Create(deployment)
+	_, err := client.Extensions().Deployments(testNamespace).Create(deployment)
 	require.NoError(t, err)
 
 	controller := NewController(client)
 	config := &armor.Armor{}
 
-	err = controller.UpdateDeploymentByName("armor-test", "foo", config)
+	err = controller.UpdateDeploymentByName(testNamespace, "foo", config)
 	require.NoError(t, err)
 
-	deployment, err = client.Extensions().Deployments("armor-test").Get("foo", metav1.GetOptions{})
+	deployment, err = client.Extensions().Deployments(testNamespace).Get("foo", metav1.GetOptions{})
 	require.NoError(t, err)
 
 	deploymentAnnotation := deployment.Annotations["armor.labstack.com/configHash"]
-
-	if deploymentAnnotation != getConfigHash(config) {
-		t.Errorf("expected %#v, got %#v", getConfigHash(config), deploymentAnnotation)
-	}
+	assert.Equal(t, getConfigHash(config), deploymentAnnotation)
 
 	podAnnotation := deployment.Spec.Template.Annotations["armor.labstack.com/configHash"]
-
-	if podAnnotation != getConfigHash(config) {
-		t.Errorf("expected %#v, got %#v", getConfigHash(config), podAnnotation)
-	}
+	assert.Equal(t, getConfigHash(config), podAnnotation)
 }
 
 func TestUpdateDeployment(t *testing.T) {
 	deployment := &extensions.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "armor-test",
+			Namespace: testNamespace,
 			Name:      "foo",
 		},
 	}
 
 	client := fake.NewSimpleClientset()
 
-	_, err := client.Extensions().Deployments("armor-test").Create(deployment)
+	_, err := client.Extensions().Deployments(testNamespace).Create(deployment)
 	require.NoError(t, err)
 
 	controller := NewController(client)
@@ -657,68 +479,56 @@ func TestUpdateDeployment(t *testing.T) {
 	err = controller.UpdateDeployment(deployment, config)
 	require.NoError(t, err)
 
-	deployment, err = client.Extensions().Deployments("armor-test").Get("foo", metav1.GetOptions{})
+	deployment, err = client.Extensions().Deployments(testNamespace).Get("foo", metav1.GetOptions{})
 	require.NoError(t, err)
 
 	deploymentAnnotation := deployment.Annotations["armor.labstack.com/configHash"]
-
-	if deploymentAnnotation != getConfigHash(config) {
-		t.Errorf("expected %#v, got %#v", getConfigHash(config), deploymentAnnotation)
-	}
+	assert.Equal(t, getConfigHash(config), deploymentAnnotation)
 
 	podAnnotation := deployment.Spec.Template.Annotations["armor.labstack.com/configHash"]
-
-	if podAnnotation != getConfigHash(config) {
-		t.Errorf("expected %#v, got %#v", getConfigHash(config), podAnnotation)
-	}
+	assert.Equal(t, getConfigHash(config), podAnnotation)
 }
 
 func TestUpdateDaemonSetByName(t *testing.T) {
 	daemonSet := &extensions.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "armor-test",
+			Namespace: testNamespace,
 			Name:      "foo",
 		},
 	}
 
 	client := fake.NewSimpleClientset()
 
-	_, err := client.Extensions().DaemonSets("armor-test").Create(daemonSet)
+	_, err := client.Extensions().DaemonSets(testNamespace).Create(daemonSet)
 	require.NoError(t, err)
 
 	controller := NewController(client)
 	config := &armor.Armor{}
 
-	daemonSet, err = controller.UpdateDaemonSetByName("armor-test", "foo", config)
+	daemonSet, err = controller.UpdateDaemonSetByName(testNamespace, "foo", config)
 	require.NoError(t, err)
 
-	daemonSet, err = client.Extensions().DaemonSets("armor-test").Get(daemonSet.Name, metav1.GetOptions{})
+	daemonSet, err = client.Extensions().DaemonSets(testNamespace).Get(daemonSet.Name, metav1.GetOptions{})
 	require.NoError(t, err)
 
 	daemonSetAnnotation := daemonSet.Annotations["armor.labstack.com/configHash"]
-
-	if daemonSetAnnotation != getConfigHash(config) {
-		t.Errorf("expected %#v, got %#v", getConfigHash(config), daemonSetAnnotation)
-	}
+	assert.Equal(t, getConfigHash(config), daemonSetAnnotation)
 
 	podAnnotation := daemonSet.Spec.Template.Annotations["armor.labstack.com/configHash"]
-
-	if podAnnotation != getConfigHash(config) {
-		t.Errorf("expected %#v, got %#v", getConfigHash(config), podAnnotation)
-	}
+	assert.Equal(t, getConfigHash(config), podAnnotation)
 }
 
 func TestUpdateDaemonSet(t *testing.T) {
 	daemonSet := &extensions.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "armor-test",
+			Namespace: testNamespace,
 			Name:      "foo",
 		},
 	}
 
 	client := fake.NewSimpleClientset()
 
-	_, err := client.Extensions().DaemonSets("armor-test").Create(daemonSet)
+	_, err := client.Extensions().DaemonSets(testNamespace).Create(daemonSet)
 	require.NoError(t, err)
 
 	controller := NewController(client)
@@ -727,20 +537,14 @@ func TestUpdateDaemonSet(t *testing.T) {
 	daemonSet, err = controller.UpdateDaemonSet(daemonSet, config)
 	require.NoError(t, err)
 
-	daemonSet, err = client.Extensions().DaemonSets("armor-test").Get(daemonSet.Name, metav1.GetOptions{})
+	daemonSet, err = client.Extensions().DaemonSets(testNamespace).Get(daemonSet.Name, metav1.GetOptions{})
 	require.NoError(t, err)
 
 	daemonSetAnnotation := daemonSet.Annotations["armor.labstack.com/configHash"]
-
-	if daemonSetAnnotation != getConfigHash(config) {
-		t.Errorf("expected %#v, got %#v", getConfigHash(config), daemonSetAnnotation)
-	}
+	assert.Equal(t, getConfigHash(config), daemonSetAnnotation)
 
 	podAnnotation := daemonSet.Spec.Template.Annotations["armor.labstack.com/configHash"]
-
-	if podAnnotation != getConfigHash(config) {
-		t.Errorf("expected %#v, got %#v", getConfigHash(config), podAnnotation)
-	}
+	assert.Equal(t, getConfigHash(config), podAnnotation)
 }
 
 func TestGetNodeIPs(t *testing.T) {
@@ -772,13 +576,7 @@ func TestGetNodeIPs(t *testing.T) {
 	nodeIPs, err := controller.GetNodeIPs()
 	require.NoError(t, err)
 
-	if len(nodeIPs) != 1 {
-		t.Fatalf("expected 1, got %d", len(nodeIPs))
-	}
-
-	if nodeIPs[0] != "54.10.11.12" {
-		t.Errorf("expected 54.10.11.12, got %#v", nodeIPs[0])
-	}
+	assert.Equal(t, []string{"54.10.11.12"}, nodeIPs)
 }
 
 func TestGetNodeNamesByPodLabelSelector(t *testing.T) {
@@ -828,11 +626,11 @@ func TestGetNodeNamesByPodLabelSelector(t *testing.T) {
 		"app": "armor",
 	}
 
-	fixtures := []*v1.Pod{
+	pods := []*v1.Pod{
 		// should be included
 		{
 			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "armor-test",
+				Namespace: testNamespace,
 				Name:      "foo",
 				Labels:    labelSet,
 			},
@@ -856,7 +654,7 @@ func TestGetNodeNamesByPodLabelSelector(t *testing.T) {
 		// should not be included: doesn't match labels
 		{
 			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "armor-test",
+				Namespace: testNamespace,
 				Name:      "qux",
 			},
 			Spec: v1.PodSpec{
@@ -867,7 +665,7 @@ func TestGetNodeNamesByPodLabelSelector(t *testing.T) {
 		// should not be included: duplicate
 		{
 			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "armor-test",
+				Namespace: testNamespace,
 				Name:      "waldo",
 				Labels:    labelSet,
 			},
@@ -879,7 +677,7 @@ func TestGetNodeNamesByPodLabelSelector(t *testing.T) {
 		// should not be included: no assigned node
 		{
 			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "armor-test",
+				Namespace: testNamespace,
 				Name:      "quux",
 				Labels:    labelSet,
 			},
@@ -893,23 +691,17 @@ func TestGetNodeNamesByPodLabelSelector(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	for _, fixture := range fixtures {
-		_, err := client.Core().Pods(fixture.Namespace).Create(fixture)
+	for _, pod := range pods {
+		_, err := client.Core().Pods(pod.Namespace).Create(pod)
 		require.NoError(t, err)
 	}
 
 	controller := NewController(client)
 
-	nodeNames, err := controller.GetNodeNamesByPodLabelSelector("armor-test", labels.SelectorFromSet(labelSet))
+	nodeNames, err := controller.GetNodeNamesByPodLabelSelector(testNamespace, labels.SelectorFromSet(labelSet))
 	require.NoError(t, err)
 
-	if len(nodeNames) != 1 {
-		t.Fatalf("expected 1, got %d", len(nodeNames))
-	}
-
-	if nodeNames[0] != "foo" {
-		t.Errorf("expected foo, got %#v", nodeNames[0])
-	}
+	assert.Equal(t, []string{"foo"}, nodeNames)
 }
 
 func TestGetExternalNodeIPsByNodeNames(t *testing.T) {
@@ -960,13 +752,7 @@ func TestGetExternalNodeIPsByNodeNames(t *testing.T) {
 	nodeIPs, err := controller.GetExternalNodeIPsByNodeNames([]string{"foo", "qux"})
 	require.NoError(t, err)
 
-	if len(nodeIPs) != 1 {
-		t.Fatalf("expected 1, got %d", len(nodeIPs))
-	}
-
-	if nodeIPs[0] != "54.10.11.12" {
-		t.Errorf("expected 54.10.11.12, got %#v", nodeIPs[0])
-	}
+	assert.Equal(t, []string{"54.10.11.12"}, nodeIPs)
 }
 
 func TestGetConfigHash(t *testing.T) {
@@ -977,6 +763,7 @@ func TestGetConfigHash(t *testing.T) {
 			},
 		},
 	}
+	configHash := getConfigHash(config)
 
 	otherConfig := &armor.Armor{
 		Hosts: map[string]*armor.Host{
@@ -986,13 +773,8 @@ func TestGetConfigHash(t *testing.T) {
 		},
 	}
 
-	if getConfigHash(config) != getConfigHash(config) {
-		t.Errorf("equal configs should hash equally")
-	}
-
-	if getConfigHash(config) == getConfigHash(otherConfig) {
-		t.Errorf("different configs should hash differently")
-	}
+	assert.Equal(t, configHash, getConfigHash(config))
+	assert.NotEqual(t, configHash, getConfigHash(otherConfig))
 }
 
 func TestUpstreamServiceURL(t *testing.T) {
@@ -1003,8 +785,45 @@ func TestUpstreamServiceURL(t *testing.T) {
 		{"1.2.3.4", "8080", "http://1.2.3.4:8080"},
 	} {
 		got := upstreamServiceURL(test.ip, test.port)
-		if got != test.want {
-			t.Errorf("upstreamServiceURL(%q, %q) => %q, want %q", test.ip, test.port, got, test.want)
-		}
+		assert.Equal(t, test.want, got)
+	}
+}
+
+func newTestController(t *testing.T, ingresses []*extensions.Ingress) (*Controller, kubernetes.Interface) {
+	client := fake.NewSimpleClientset()
+	controller := NewController(client)
+	seedIngresses(t, client, ingresses)
+	return controller, client
+}
+
+func seedIngresses(t *testing.T, client kubernetes.Interface, ingresses []*extensions.Ingress) {
+	for _, ingress := range ingresses {
+		_, err := client.Extensions().Ingresses(testNamespace).Create(ingress)
+		require.NoError(t, err)
+	}
+}
+
+// TODO(linki): make tests independent of ordering
+func assertIngresses(t *testing.T, ingresses []*extensions.Ingress, expected []map[string]string) {
+	require.Len(t, ingresses, len(expected))
+
+	for i := range ingresses {
+		assertIngress(t, ingresses[i], expected[i])
+	}
+}
+
+func assertIngress(t *testing.T, ingress *extensions.Ingress, expected map[string]string) {
+	assert.Equal(t, expected["name"], ingress.Name)
+	assert.Equal(t, expected["namespace"], ingress.Namespace)
+}
+
+// TODO(linki): make tests independent of ordering
+func assertLoadBalancerIPs(t *testing.T, ingress *extensions.Ingress, expected []string) {
+	loadBalancers := ingress.Status.LoadBalancer.Ingress
+
+	require.Len(t, loadBalancers, len(expected))
+
+	for i := range loadBalancers {
+		assert.Equal(t, expected[i], loadBalancers[i].IP)
 	}
 }
