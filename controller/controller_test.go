@@ -13,15 +13,16 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNew(t *testing.T) {
 	client := fake.NewSimpleClientset()
 	controller := NewController(client)
 
-	if controller.Client != client {
-		t.Errorf("expected %#v, got %#v", client, controller.Client)
-	}
+	assert.Equal(t, client, controller.Client)
 }
 
 func TestGetIngresses(t *testing.T) {
@@ -60,17 +61,14 @@ func TestGetIngresses(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	for _, fixture := range fixtures {
-		if _, err := client.Extensions().Ingresses("armor-test").Create(fixture); err != nil {
-			t.Fatal(err)
-		}
+		_, err := client.Extensions().Ingresses("armor-test").Create(fixture)
+		require.NoError(t, err)
 	}
 
 	controller := NewController(client)
 
 	ingresses, err := controller.GetIngresses()
-	if err != nil {
-		t.Error(err)
-	}
+	assert.NoError(t, err)
 
 	if len(ingresses) != 2 {
 		t.Fatalf("expected 2, got %d", len(ingresses))
@@ -120,23 +118,19 @@ func TestUpdateIngressLoadBalancer(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	for _, fixture := range fixtures {
-		if _, err := client.Extensions().Ingresses("armor-test").Create(&fixture); err != nil {
-			t.Fatal(err)
-		}
+		_, err := client.Extensions().Ingresses("armor-test").Create(&fixture)
+		require.NoError(t, err)
 	}
 
 	controller := NewController(client)
 
-	if err := controller.UpdateIngressLoadBalancers(fixtures, "8.8.8.8", "8.8.4.4"); err != nil {
-		t.Error(err)
-	}
+	err := controller.UpdateIngressLoadBalancers(fixtures, "8.8.8.8", "8.8.4.4")
+	assert.NoError(t, err)
 
 	// check first one
 
 	ingress, err := client.Extensions().Ingresses("armor-test").Get("foo", metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	loadBalancerIPs := ingress.Status.LoadBalancer.Ingress
 
@@ -160,9 +154,7 @@ func TestUpdateIngressLoadBalancer(t *testing.T) {
 	// check second one
 
 	ingress, err = client.Extensions().Ingresses("armor-test").Get("bar", metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	loadBalancerIPs = ingress.Status.LoadBalancer.Ingress
 
@@ -302,17 +294,14 @@ func TestGenerateConfig(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	for _, service := range services {
-		if _, err := client.Core().Services(service.Namespace).Create(&service); err != nil {
-			t.Fatal(err)
-		}
+		_, err := client.Core().Services(service.Namespace).Create(&service)
+		require.NoError(t, err)
 	}
 
 	controller := NewController(client)
 
 	config, err := controller.GenerateConfig(fixtures...)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	if len(config.Hosts) != 3 {
 		t.Fatalf("expected 3, got %d", len(config.Hosts))
@@ -412,9 +401,7 @@ func TestIncludeGlobalPlugins(t *testing.T) {
 	controller := NewController(fake.NewSimpleClientset())
 
 	config, err := controller.GenerateConfig(extensions.Ingress{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	if len(config.Plugins) != 2 {
 		t.Fatalf("expected 2, got %d", len(config.Plugins))
@@ -446,9 +433,7 @@ func TestSetupAutoTLS(t *testing.T) {
 	controller := NewController(fake.NewSimpleClientset())
 
 	config, err := controller.GenerateConfig(extensions.Ingress{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	if config.TLS == nil {
 		t.Fatalf("TLS not configured.")
@@ -471,17 +456,14 @@ func TestEnsureConfigMap(t *testing.T) {
 	client := fake.NewSimpleClientset()
 	controller := NewController(client)
 
-	if err := controller.EnsureConfigMap("armor-test", "foo"); err != nil {
-		t.Fatal(err)
-	}
+	err := controller.EnsureConfigMap("armor-test", "foo")
+	require.NoError(t, err)
 
-	if _, err := client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{}); err != nil {
-		t.Fatal(err)
-	}
+	_, err = client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{})
+	require.NoError(t, err)
 
-	if err := controller.EnsureConfigMap("armor-test", "foo"); err != nil {
-		t.Fatal(err)
-	}
+	err = controller.EnsureConfigMap("armor-test", "foo")
+	require.NoError(t, err)
 }
 
 func TestWriteConfigToConfigMapByName(t *testing.T) {
@@ -494,9 +476,8 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 
 	client := fake.NewSimpleClientset()
 
-	if _, err := client.Core().ConfigMaps("armor-test").Create(configMap); err != nil {
-		t.Fatal(err)
-	}
+	_, err := client.Core().ConfigMaps("armor-test").Create(configMap)
+	require.NoError(t, err)
 
 	config := &armor.Armor{
 		Hosts: map[string]*armor.Host{
@@ -508,14 +489,11 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 
 	controller := NewController(client)
 
-	if err := controller.WriteConfigToConfigMapByName(config, "armor-test", "foo", "bar"); err != nil {
-		t.Fatal(err)
-	}
+	err = controller.WriteConfigToConfigMapByName(config, "armor-test", "foo", "bar")
+	require.NoError(t, err)
 
-	configMap, err := client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	configMap, err = client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{})
+	require.NoError(t, err)
 
 	configMapAnnotation := configMap.Annotations["armor.labstack.com/configHash"]
 
@@ -525,9 +503,8 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 
 	var loaded armor.Armor
 
-	if err := yaml.Unmarshal([]byte(configMap.Data["bar"]), &loaded); err != nil {
-		t.Fatal(err)
-	}
+	err = yaml.Unmarshal([]byte(configMap.Data["bar"]), &loaded)
+	require.NoError(t, err)
 
 	if len(loaded.Hosts) != 1 {
 		t.Fatalf("expected 1, got %d", len(loaded.Hosts))
@@ -555,9 +532,8 @@ func TestWriteConfigToConfigMap(t *testing.T) {
 
 	client := fake.NewSimpleClientset()
 
-	if _, err := client.Core().ConfigMaps("armor-test").Create(configMap); err != nil {
-		t.Fatal(err)
-	}
+	_, err := client.Core().ConfigMaps("armor-test").Create(configMap)
+	require.NoError(t, err)
 
 	config := &armor.Armor{
 		Hosts: map[string]*armor.Host{
@@ -569,20 +545,16 @@ func TestWriteConfigToConfigMap(t *testing.T) {
 
 	controller := NewController(client)
 
-	if err := controller.WriteConfigToConfigMap(config, configMap, "bar"); err != nil {
-		t.Fatal(err)
-	}
+	err = controller.WriteConfigToConfigMap(config, configMap, "bar")
+	require.NoError(t, err)
 
-	configMap, err := client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	configMap, err = client.Core().ConfigMaps("armor-test").Get("foo", metav1.GetOptions{})
+	require.NoError(t, err)
 
 	var loaded armor.Armor
 
-	if err := yaml.Unmarshal([]byte(configMap.Data["bar"]), &loaded); err != nil {
-		t.Fatal(err)
-	}
+	err = yaml.Unmarshal([]byte(configMap.Data["bar"]), &loaded)
+	require.NoError(t, err)
 
 	if len(loaded.Hosts) != 1 {
 		t.Fatalf("expected 1, got %d", len(loaded.Hosts))
@@ -610,15 +582,13 @@ func TestWriteConfigToWriter(t *testing.T) {
 
 	var buffer bytes.Buffer
 
-	if err := controller.WriteConfigToWriter(config, &buffer); err != nil {
-		t.Fatal(err)
-	}
+	err := controller.WriteConfigToWriter(config, &buffer)
+	require.NoError(t, err)
 
 	var loaded armor.Armor
 
-	if err := yaml.Unmarshal(buffer.Bytes(), &loaded); err != nil {
-		t.Fatal(err)
-	}
+	err = yaml.Unmarshal(buffer.Bytes(), &loaded)
+	require.NoError(t, err)
 
 	if len(loaded.Hosts) != 1 {
 		t.Fatalf("expected 1, got %d", len(loaded.Hosts))
@@ -643,21 +613,17 @@ func TestUpdateDeploymentByName(t *testing.T) {
 
 	client := fake.NewSimpleClientset()
 
-	if _, err := client.Extensions().Deployments("armor-test").Create(deployment); err != nil {
-		t.Fatal(err)
-	}
+	_, err := client.Extensions().Deployments("armor-test").Create(deployment)
+	require.NoError(t, err)
 
 	controller := NewController(client)
 	config := &armor.Armor{}
 
-	if err := controller.UpdateDeploymentByName("armor-test", "foo", config); err != nil {
-		t.Fatal(err)
-	}
+	err = controller.UpdateDeploymentByName("armor-test", "foo", config)
+	require.NoError(t, err)
 
-	deployment, err := client.Extensions().Deployments("armor-test").Get("foo", metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	deployment, err = client.Extensions().Deployments("armor-test").Get("foo", metav1.GetOptions{})
+	require.NoError(t, err)
 
 	deploymentAnnotation := deployment.Annotations["armor.labstack.com/configHash"]
 
@@ -682,21 +648,17 @@ func TestUpdateDeployment(t *testing.T) {
 
 	client := fake.NewSimpleClientset()
 
-	if _, err := client.Extensions().Deployments("armor-test").Create(deployment); err != nil {
-		t.Fatal(err)
-	}
+	_, err := client.Extensions().Deployments("armor-test").Create(deployment)
+	require.NoError(t, err)
 
 	controller := NewController(client)
 	config := &armor.Armor{}
 
-	if err := controller.UpdateDeployment(deployment, config); err != nil {
-		t.Fatal(err)
-	}
+	err = controller.UpdateDeployment(deployment, config)
+	require.NoError(t, err)
 
-	deployment, err := client.Extensions().Deployments("armor-test").Get("foo", metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	deployment, err = client.Extensions().Deployments("armor-test").Get("foo", metav1.GetOptions{})
+	require.NoError(t, err)
 
 	deploymentAnnotation := deployment.Annotations["armor.labstack.com/configHash"]
 
@@ -721,22 +683,17 @@ func TestUpdateDaemonSetByName(t *testing.T) {
 
 	client := fake.NewSimpleClientset()
 
-	if _, err := client.Extensions().DaemonSets("armor-test").Create(daemonSet); err != nil {
-		t.Fatal(err)
-	}
+	_, err := client.Extensions().DaemonSets("armor-test").Create(daemonSet)
+	require.NoError(t, err)
 
 	controller := NewController(client)
 	config := &armor.Armor{}
 
-	daemonSet, err := controller.UpdateDaemonSetByName("armor-test", "foo", config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	daemonSet, err = controller.UpdateDaemonSetByName("armor-test", "foo", config)
+	require.NoError(t, err)
 
 	daemonSet, err = client.Extensions().DaemonSets("armor-test").Get(daemonSet.Name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	daemonSetAnnotation := daemonSet.Annotations["armor.labstack.com/configHash"]
 
@@ -761,22 +718,17 @@ func TestUpdateDaemonSet(t *testing.T) {
 
 	client := fake.NewSimpleClientset()
 
-	if _, err := client.Extensions().DaemonSets("armor-test").Create(daemonSet); err != nil {
-		t.Fatal(err)
-	}
+	_, err := client.Extensions().DaemonSets("armor-test").Create(daemonSet)
+	require.NoError(t, err)
 
 	controller := NewController(client)
 	config := &armor.Armor{}
 
-	daemonSet, err := controller.UpdateDaemonSet(daemonSet, config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	daemonSet, err = controller.UpdateDaemonSet(daemonSet, config)
+	require.NoError(t, err)
 
 	daemonSet, err = client.Extensions().DaemonSets("armor-test").Get(daemonSet.Name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	daemonSetAnnotation := daemonSet.Annotations["armor.labstack.com/configHash"]
 
@@ -812,17 +764,13 @@ func TestGetNodeIPs(t *testing.T) {
 
 	client := fake.NewSimpleClientset()
 
-	if _, err := client.Core().Nodes().Create(node); err != nil {
-		t.Fatal(err)
-	}
+	_, err := client.Core().Nodes().Create(node)
+	require.NoError(t, err)
 
 	controller := NewController(client)
 
 	nodeIPs, err := controller.GetNodeIPs()
-
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	if len(nodeIPs) != 1 {
 		t.Fatalf("expected 1, got %d", len(nodeIPs))
@@ -941,23 +889,19 @@ func TestGetNodeNamesByPodLabelSelector(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	for _, node := range nodes {
-		if _, err := client.Core().Nodes().Create(node); err != nil {
-			t.Fatal(err)
-		}
+		_, err := client.Core().Nodes().Create(node)
+		require.NoError(t, err)
 	}
 
 	for _, fixture := range fixtures {
-		if _, err := client.Core().Pods(fixture.Namespace).Create(fixture); err != nil {
-			t.Fatal(err)
-		}
+		_, err := client.Core().Pods(fixture.Namespace).Create(fixture)
+		require.NoError(t, err)
 	}
 
 	controller := NewController(client)
 
 	nodeNames, err := controller.GetNodeNamesByPodLabelSelector("armor-test", labels.SelectorFromSet(labelSet))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	if len(nodeNames) != 1 {
 		t.Fatalf("expected 1, got %d", len(nodeNames))
@@ -1005,21 +949,16 @@ func TestGetExternalNodeIPsByNodeNames(t *testing.T) {
 
 	client := fake.NewSimpleClientset()
 
-	if _, err := client.Core().Nodes().Create(node1); err != nil {
-		t.Fatal(err)
-	}
+	_, err := client.Core().Nodes().Create(node1)
+	require.NoError(t, err)
 
-	if _, err := client.Core().Nodes().Create(node2); err != nil {
-		t.Fatal(err)
-	}
+	_, err = client.Core().Nodes().Create(node2)
+	require.NoError(t, err)
 
 	controller := NewController(client)
 
 	nodeIPs, err := controller.GetExternalNodeIPsByNodeNames([]string{"foo", "qux"})
-
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	if len(nodeIPs) != 1 {
 		t.Fatalf("expected 1, got %d", len(nodeIPs))
