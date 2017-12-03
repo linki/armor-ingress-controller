@@ -102,12 +102,16 @@ func (c *Controller) GenerateConfig(ingresses []*extensions.Ingress) (*armor.Arm
 
 	for _, ingress := range ingresses {
 		for _, rule := range ingress.Spec.Rules {
+			if config.Hosts[rule.Host] == nil {
+				config.Hosts[rule.Host] = &armor.Host{}
+			}
+
 			// TODO(linki): is this needed or would that be an invalid ingress anyways?
 			if rule.HTTP == nil {
 				continue
 			}
 
-			targets := make([]map[string]string, 0, len(rule.HTTP.Paths))
+			// targets := make([]map[string]string, 0, len(rule.HTTP.Paths))
 
 			for _, path := range rule.HTTP.Paths {
 				service, err := c.Client.Core().Services(ingress.Namespace).Get(path.Backend.ServiceName, metav1.GetOptions{})
@@ -121,21 +125,39 @@ func (c *Controller) GenerateConfig(ingresses []*extensions.Ingress) (*armor.Arm
 					return nil, err
 				}
 
-				target := map[string]string{
-					"url": upstreamServiceURL(service.Spec.ClusterIP, path.Backend.ServicePort.String()),
+				if config.Hosts[rule.Host].Paths[path.Path] == nil {
+					config.Hosts[rule.Host].Paths[path.Path] = &armor.Path{}
+					config.Hosts[rule.Host].Paths[path.Path].Plugins = []armor.Plugin{
+						armor.Plugin{
+							"name":    "proxy",
+							"targets": []map[string]string{},
+						},
+					}
 				}
 
-				targets = append(targets, target)
+				config.Hosts[rule.Host].Paths[path.Path].Plugins[0]["targets"] = append(config.Hosts[rule.Host].Paths[path.Path].Plugins[0]["targets"].([]map[string]string), map[string]string{
+					"url": upstreamServiceURL(service.Spec.ClusterIP, path.Backend.ServicePort.String()),
+				})
+
+				// target := map[string]string{
+				// 	"url": upstreamServiceURL(service.Spec.ClusterIP, path.Backend.ServicePort.String()),
+				// }
+
+				// targets = append(targets, target)
 			}
 
-			proxy := armor.Plugin{
-				"name":    "proxy",
-				"targets": targets,
-			}
-
-			config.Hosts[rule.Host] = &armor.Host{
-				Plugins: []armor.Plugin{proxy},
-			}
+			// proxy := armor.Plugin{
+			// 	"name":    "proxy",
+			// 	"targets": targets,
+			// }
+			//
+			// config.Hosts[rule.Host] = &armor.Host{
+			// 	Paths: map[string]*armor.Path{
+			// 		"/": {
+			// 			Plugins: []armor.Plugin{proxy},
+			// 		},
+			// 	},
+			// }
 		}
 	}
 

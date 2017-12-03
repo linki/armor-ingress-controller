@@ -17,102 +17,127 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
 
 const (
 	testNamespace = "armor-test"
 )
 
-func TestNew(t *testing.T) {
-	client := fake.NewSimpleClientset()
-	controller := NewController(client)
-
-	assert.Equal(t, client, controller.Client)
+type Suite struct {
+	suite.Suite
+	client     kubernetes.Interface
+	controller *Controller
+	ingresses  []*extensions.Ingress
 }
 
-func TestGetIngresses(t *testing.T) {
-	controller, _ := newTestController(t, []*extensions.Ingress{
-		// main object under test
-		{
+func (suite *Suite) SetupTest() {
+	suite.client = fake.NewSimpleClientset()
+	suite.controller = NewController(suite.client)
+	// suite.ingresses = []*extensions.Ingress{}
+}
+
+func TestSuite(t *testing.T) {
+	suite.Run(t, new(Suite))
+}
+
+func (suite *Suite) mockIngresses(testIngresses ...testIngress) []*extensions.Ingress {
+	ingresses := []*extensions.Ingress{}
+
+	for _, testIngress := range testIngresses {
+		ingress := &extensions.Ingress{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "foo",
-				Namespace: testNamespace,
+				Name:      testIngress.name,
+				Namespace: testIngress.namespace,
 				Annotations: map[string]string{
-					"kubernetes.io/ingress.class": "armor",
+					ingressClassAnnotationKey: testIngress.class,
 				},
 			},
-		},
-		// test that it supports multiple ingresses
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "bar",
-				Namespace: testNamespace,
-				Annotations: map[string]string{
-					"kubernetes.io/ingress.class": "armor",
-				},
-			},
-		},
-		// should be filtered out by annotation
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "baz",
-				Namespace: testNamespace,
-			},
-		},
-	})
+		}
 
-	ingresses, err := controller.GetIngresses()
-	assert.NoError(t, err)
+		ingress, err := suite.client.Extensions().Ingresses(testNamespace).Create(ingress)
+		suite.Require().NoError(err)
 
-	assertIngresses(t, ingresses, []map[string]string{
-		{"name": "foo", "namespace": testNamespace},
-		{"name": "bar", "namespace": testNamespace},
+		ingresses = append(ingresses, ingress)
+	}
+
+	return ingresses
+}
+
+// TODO(linki): make tests independent of ordering
+func (suite *Suite) assertIngresses(ingresses []*extensions.Ingress, expected []testIngress) {
+	suite.Require().Len(ingresses, len(expected))
+
+	for i := range ingresses {
+		suite.assertIngress(ingresses[i], expected[i])
+	}
+}
+
+func (suite *Suite) assertIngress(ingress *extensions.Ingress, expected testIngress) {
+	suite.Assert().Equal(expected.name, ingress.Name)
+	suite.Assert().Equal(expected.namespace, ingress.Namespace)
+	suite.Assert().Equal(expected.class, ingress.Annotations[ingressClassAnnotationKey])
+}
+
+func (suite *Suite) TestNew() {
+	assert.Equal(suite.T(), suite.client, suite.controller.Client)
+}
+
+type testIngress struct {
+	name      string
+	namespace string
+	class     string
+}
+
+func (suite *Suite) TestGetIngresses() {
+	suite.mockIngresses(
+		testIngress{name: "annotated", namespace: testNamespace, class: "armor"},
+		testIngress{name: "not-annotated", namespace: testNamespace, class: ""},
+	)
+
+	ingresses, err := suite.controller.GetIngresses()
+	suite.Assert().NoError(err)
+
+	suite.assertIngresses(ingresses, []testIngress{
+		// annotated ingresses are found.
+		testIngress{name: "annotated", namespace: testNamespace, class: "armor"},
 	})
 }
 
-func TestUpdateIngressLoadBalancer(t *testing.T) {
-	foo := &extensions.Ingress{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: testNamespace,
-			Name:      "foo",
-		},
-	}
-
-	bar := &extensions.Ingress{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: testNamespace,
-			Name:      "bar",
-		},
-	}
+func (suite *Suite) TestUpdateIngressLoadBalancer() {
+	foo := testIngress{name: "foo", namespace: testNamespace, class: "armor"}
+	bar := testIngress{name: "bar", namespace: testNamespace, class: "armor"}
 
 	for _, ti := range []struct {
 		title         string
-		ingresses     []*extensions.Ingress
+		ingresses     []testIngress
 		loadBalancers []string
 	}{
 		{
 			title:         "it updates multiple ingresses with multiple IPs",
-			ingresses:     []*extensions.Ingress{foo, bar},
+			ingresses:     []testIngress{foo, bar},
 			loadBalancers: []string{"8.8.8.8", "8.8.4.4"},
 		},
 	} {
-		t.Run(ti.title, func(t *testing.T) {
-			controller, client := newTestController(t, ti.ingresses)
+		suite.T().Run(ti.title, func(_ *testing.T) {
+			ingresses := suite.mockIngresses(ti.ingresses...)
 
-			err := controller.UpdateIngressLoadBalancers(ti.ingresses, ti.loadBalancers)
-			assert.NoError(t, err)
+			err := suite.controller.UpdateIngressLoadBalancers(ingresses, ti.loadBalancers)
+			suite.Assert().NoError(err)
 
 			for _, ing := range ti.ingresses {
-				ingress, err := client.Extensions().Ingresses(ing.Namespace).Get(ing.Name, metav1.GetOptions{})
-				require.NoError(t, err)
+				ingress, err := suite.client.Extensions().Ingresses(ing.namespace).Get(ing.name, metav1.GetOptions{})
+				suite.Require().NoError(err)
 
-				assertLoadBalancerIPs(t, ingress, ti.loadBalancers)
+				assertLoadBalancerIPs(suite.T(), ingress, ti.loadBalancers)
 			}
 		})
 	}
 }
 
-func TestGenerateConfig(t *testing.T) {
+// test transformation from ingress objects to armor rules!
+
+func (suite *Suite) TestGenerateConfig() {
 	fixtures := []*extensions.Ingress{
 		// main object under test
 		{
@@ -138,6 +163,13 @@ func TestGenerateConfig(t *testing.T) {
 										Backend: extensions.IngressBackend{
 											ServiceName: "baz",
 											ServicePort: intstr.FromInt(8080),
+										},
+									},
+									{
+										Path: "/barbara",
+										Backend: extensions.IngressBackend{
+											ServiceName: "barbara",
+											ServicePort: intstr.FromInt(9090),
 										},
 									},
 								},
@@ -227,100 +259,111 @@ func TestGenerateConfig(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset()
-
 	for _, service := range services {
-		_, err := client.Core().Services(service.Namespace).Create(&service)
-		require.NoError(t, err)
+		_, err := suite.client.Core().Services(service.Namespace).Create(&service)
+		suite.Require().NoError(err)
 	}
 
-	controller := NewController(client)
-
-	config, err := controller.GenerateConfig(fixtures)
-	require.NoError(t, err)
+	config, err := suite.controller.GenerateConfig(fixtures)
+	suite.Require().NoError(err)
 
 	// TODO(linki): omit waldo entirely?
-	require.Len(t, config.Hosts, 3)
+	suite.Require().Len(config.Hosts, 3)
 
 	// test foo
 
-	require.Contains(t, config.Hosts, "foo.bar.com")
+	suite.Require().Contains(config.Hosts, "foo.bar.com")
 	foo := config.Hosts["foo.bar.com"]
-	require.Len(t, foo.Plugins, 1)
-	proxy := foo.Plugins[0]
-	assert.Equal(t, "proxy", proxy["name"])
+	suite.Require().Len(foo.Paths, 2)
+
+	suite.Require().Contains(foo.Paths, "/")
+	path := foo.Paths["/"]
+	suite.Require().Len(path.Plugins, 1)
+	proxy := path.Plugins[0]
+	suite.Assert().Equal("proxy", proxy["name"])
 	targets := proxy["targets"].([]map[string]string)
-	require.Len(t, targets, 2)
-	assert.Equal(t, "http://8.8.8.8:80", targets[0]["url"])
-	assert.Equal(t, "http://8.8.4.4:8080", targets[1]["url"])
+	suite.Require().Len(targets, 2)
+	suite.Assert().Equal("http://8.8.8.8:80", targets[0]["url"])
+	suite.Assert().Equal("http://8.8.4.4:8080", targets[1]["url"])
+
+	// test foo - barbara
+
+	suite.Require().Contains(foo.Paths, "/barbara")
+	path = foo.Paths["/barbara"]
+	suite.Require().Len(path.Plugins, 1)
+	proxy = path.Plugins[0]
+	suite.Assert().Equal("proxy", proxy["name"])
+	targets = proxy["targets"].([]map[string]string)
+	suite.Require().Len(targets, 1)
+	suite.Assert().Equal("http://4.3.2.1:9090", targets[0]["url"])
 
 	// test waldo
 
 	// TODO(linki): omit the hostname entirely?
-	require.Contains(t, config.Hosts, "waldo.fred.com")
+	suite.Require().Contains(config.Hosts, "waldo.fred.com")
 	waldo := config.Hosts["waldo.fred.com"]
-	require.Len(t, waldo.Plugins, 1)
-	proxy = waldo.Plugins[0]
-	assert.Equal(t, "proxy", proxy["name"])
+	suite.Require().Len(waldo.Paths, 1)
+	suite.Require().Contains(waldo.Paths, "/")
+	path = waldo.Paths["/"]
+	suite.Require().Len(path.Plugins, 1)
+	proxy = path.Plugins[0]
+	suite.Assert().Equal("proxy", proxy["name"])
 	targets = proxy["targets"].([]map[string]string)
-	require.Len(t, targets, 0)
+	suite.Require().Len(targets, 0)
 
 	// test qux
 
-	require.Contains(t, config.Hosts, "qux.quux.com")
+	suite.Require().Contains(config.Hosts, "qux.quux.com")
 	qux := config.Hosts["qux.quux.com"]
-	require.Len(t, qux.Plugins, 1)
-	proxy = qux.Plugins[0]
-	assert.Equal(t, "proxy", proxy["name"])
+	suite.Require().Len(qux.Paths, 1)
+	suite.Require().Contains(qux.Paths, "/")
+	path = qux.Paths["/"]
+	suite.Require().Len(path.Plugins, 1)
+	proxy = path.Plugins[0]
+	suite.Assert().Equal("proxy", proxy["name"])
 	targets = proxy["targets"].([]map[string]string)
-	require.Len(t, targets, 1)
-	assert.Equal(t, "http://1.2.3.4:443", targets[0]["url"])
+	suite.Require().Len(targets, 1)
+	suite.Assert().Equal("http://1.2.3.4:443", targets[0]["url"])
 }
 
-func TestIncludeGlobalPlugins(t *testing.T) {
-	controller, _ := newTestController(t, nil)
-
-	config, err := controller.GenerateConfig(nil)
-	require.NoError(t, err)
+func (suite *Suite) TestIncludeGlobalPlugins() {
+	config, err := suite.controller.GenerateConfig(nil)
+	suite.Require().NoError(err)
 
 	plugins := []string{}
 	for _, plugin := range config.Plugins {
 		plugins = append(plugins, plugin["name"].(string))
 	}
 
-	assert.Len(t, plugins, 2)
+	suite.Assert().Len(plugins, 2)
 
-	assert.Contains(t, plugins, "logger")
-	assert.Contains(t, plugins, "https-redirect")
+	suite.Assert().Contains(plugins, "logger")
+	suite.Assert().Contains(plugins, "https-redirect")
 }
 
-func TestSetupAutoTLS(t *testing.T) {
-	controller, _ := newTestController(t, nil)
+func (suite *Suite) TestSetupAutoTLS() {
+	config, err := suite.controller.GenerateConfig(nil)
+	suite.Require().NoError(err)
 
-	config, err := controller.GenerateConfig(nil)
-	require.NoError(t, err)
+	suite.Require().NotNil(config.TLS)
 
-	require.NotNil(t, config.TLS)
-
-	assert.True(t, config.TLS.Auto)
-	assert.Equal(t, ":443", config.TLS.Address)
-	assert.Equal(t, "/var/cache/armor", config.TLS.CacheDir)
+	suite.Assert().True(config.TLS.Auto)
+	suite.Assert().Equal(":443", config.TLS.Address)
+	suite.Assert().Equal("/var/cache/armor", config.TLS.CacheDir)
 }
 
-func TestEnsureConfigMap(t *testing.T) {
-	controller, client := newTestController(t, nil)
+func (suite *Suite) TestEnsureConfigMap() {
+	err := suite.controller.EnsureConfigMap(testNamespace, "foo")
+	suite.Require().NoError(err)
 
-	err := controller.EnsureConfigMap(testNamespace, "foo")
-	require.NoError(t, err)
+	_, err = suite.client.Core().ConfigMaps(testNamespace).Get("foo", metav1.GetOptions{})
+	suite.Require().NoError(err)
 
-	_, err = client.Core().ConfigMaps(testNamespace).Get("foo", metav1.GetOptions{})
-	require.NoError(t, err)
-
-	err = controller.EnsureConfigMap(testNamespace, "foo")
-	require.NoError(t, err)
+	err = suite.controller.EnsureConfigMap(testNamespace, "foo")
+	suite.Require().NoError(err)
 }
 
-func TestWriteConfigToConfigMapByName(t *testing.T) {
+func (suite *Suite) TestWriteConfigToConfigMapByName() {
 	configMap := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: testNamespace,
@@ -328,10 +371,8 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset()
-
-	_, err := client.Core().ConfigMaps(testNamespace).Create(configMap)
-	require.NoError(t, err)
+	_, err := suite.client.Core().ConfigMaps(testNamespace).Create(configMap)
+	suite.Require().NoError(err)
 
 	config := &armor.Armor{
 		Hosts: map[string]*armor.Host{
@@ -341,29 +382,27 @@ func TestWriteConfigToConfigMapByName(t *testing.T) {
 		},
 	}
 
-	controller := NewController(client)
+	err = suite.controller.WriteConfigToConfigMapByName(config, testNamespace, "foo", "bar")
+	suite.Require().NoError(err)
 
-	err = controller.WriteConfigToConfigMapByName(config, testNamespace, "foo", "bar")
-	require.NoError(t, err)
-
-	configMap, err = client.Core().ConfigMaps(testNamespace).Get("foo", metav1.GetOptions{})
-	require.NoError(t, err)
+	configMap, err = suite.client.Core().ConfigMaps(testNamespace).Get("foo", metav1.GetOptions{})
+	suite.Require().NoError(err)
 
 	configMapAnnotation := configMap.Annotations["armor.labstack.com/configHash"]
 
-	assert.Equal(t, getConfigHash(config), configMapAnnotation)
+	suite.Assert().Equal(getConfigHash(config), configMapAnnotation)
 
 	var loaded armor.Armor
 
 	err = yaml.Unmarshal([]byte(configMap.Data["bar"]), &loaded)
-	require.NoError(t, err)
+	suite.Require().NoError(err)
 
-	require.Len(t, loaded.Hosts, 1)
-	require.NotNil(t, loaded.Hosts["foo"])
-	assert.Equal(t, "cert", loaded.Hosts["foo"].CertFile)
+	suite.Require().Len(loaded.Hosts, 1)
+	suite.Require().NotNil(loaded.Hosts["foo"])
+	suite.Assert().Equal("cert", loaded.Hosts["foo"].CertFile)
 }
 
-func TestWriteConfigToConfigMap(t *testing.T) {
+func (suite *Suite) TestWriteConfigToConfigMap() {
 	configMap := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: testNamespace,
@@ -374,10 +413,8 @@ func TestWriteConfigToConfigMap(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset()
-
-	_, err := client.Core().ConfigMaps(testNamespace).Create(configMap)
-	require.NoError(t, err)
+	_, err := suite.client.Core().ConfigMaps(testNamespace).Create(configMap)
+	suite.Require().NoError(err)
 
 	config := &armor.Armor{
 		Hosts: map[string]*armor.Host{
@@ -387,25 +424,23 @@ func TestWriteConfigToConfigMap(t *testing.T) {
 		},
 	}
 
-	controller := NewController(client)
+	err = suite.controller.WriteConfigToConfigMap(config, configMap, "bar")
+	suite.Require().NoError(err)
 
-	err = controller.WriteConfigToConfigMap(config, configMap, "bar")
-	require.NoError(t, err)
-
-	configMap, err = client.Core().ConfigMaps(testNamespace).Get("foo", metav1.GetOptions{})
-	require.NoError(t, err)
+	configMap, err = suite.client.Core().ConfigMaps(testNamespace).Get("foo", metav1.GetOptions{})
+	suite.Require().NoError(err)
 
 	var loaded armor.Armor
 
 	err = yaml.Unmarshal([]byte(configMap.Data["bar"]), &loaded)
-	require.NoError(t, err)
+	suite.Require().NoError(err)
 
-	require.Len(t, loaded.Hosts, 1)
-	require.NotNil(t, loaded.Hosts["foo"])
-	assert.Equal(t, "cert", loaded.Hosts["foo"].CertFile)
+	suite.Require().Len(loaded.Hosts, 1)
+	suite.Require().NotNil(loaded.Hosts["foo"])
+	suite.Assert().Equal("cert", loaded.Hosts["foo"].CertFile)
 }
 
-func TestWriteConfigToWriter(t *testing.T) {
+func (suite *Suite) TestWriteConfigToWriter() {
 	config := &armor.Armor{
 		Hosts: map[string]*armor.Host{
 			"foo": {
@@ -414,24 +449,22 @@ func TestWriteConfigToWriter(t *testing.T) {
 		},
 	}
 
-	controller := NewController(fake.NewSimpleClientset())
-
 	var buffer bytes.Buffer
 
-	err := controller.WriteConfigToWriter(config, &buffer)
-	require.NoError(t, err)
+	err := suite.controller.WriteConfigToWriter(config, &buffer)
+	suite.Require().NoError(err)
 
 	var loaded armor.Armor
 
 	err = yaml.Unmarshal(buffer.Bytes(), &loaded)
-	require.NoError(t, err)
+	suite.Require().NoError(err)
 
-	require.Len(t, loaded.Hosts, 1)
-	require.NotNil(t, loaded.Hosts["foo"])
-	assert.Equal(t, "cert", loaded.Hosts["foo"].CertFile)
+	suite.Require().Len(loaded.Hosts, 1)
+	suite.Require().NotNil(loaded.Hosts["foo"])
+	suite.Assert().Equal("cert", loaded.Hosts["foo"].CertFile)
 }
 
-func TestUpdateDeploymentByName(t *testing.T) {
+func (suite *Suite) TestUpdateDeploymentByName() {
 	deployment := &extensions.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: testNamespace,
@@ -439,28 +472,25 @@ func TestUpdateDeploymentByName(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset()
+	_, err := suite.client.Extensions().Deployments(testNamespace).Create(deployment)
+	suite.Require().NoError(err)
 
-	_, err := client.Extensions().Deployments(testNamespace).Create(deployment)
-	require.NoError(t, err)
-
-	controller := NewController(client)
 	config := &armor.Armor{}
 
-	err = controller.UpdateDeploymentByName(testNamespace, "foo", config)
-	require.NoError(t, err)
+	err = suite.controller.UpdateDeploymentByName(testNamespace, "foo", config)
+	suite.Require().NoError(err)
 
-	deployment, err = client.Extensions().Deployments(testNamespace).Get("foo", metav1.GetOptions{})
-	require.NoError(t, err)
+	deployment, err = suite.client.Extensions().Deployments(testNamespace).Get("foo", metav1.GetOptions{})
+	suite.Require().NoError(err)
 
 	deploymentAnnotation := deployment.Annotations["armor.labstack.com/configHash"]
-	assert.Equal(t, getConfigHash(config), deploymentAnnotation)
+	suite.Assert().Equal(getConfigHash(config), deploymentAnnotation)
 
 	podAnnotation := deployment.Spec.Template.Annotations["armor.labstack.com/configHash"]
-	assert.Equal(t, getConfigHash(config), podAnnotation)
+	suite.Assert().Equal(getConfigHash(config), podAnnotation)
 }
 
-func TestUpdateDeployment(t *testing.T) {
+func (suite *Suite) TestUpdateDeployment() {
 	deployment := &extensions.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: testNamespace,
@@ -468,28 +498,25 @@ func TestUpdateDeployment(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset()
+	_, err := suite.client.Extensions().Deployments(testNamespace).Create(deployment)
+	suite.Require().NoError(err)
 
-	_, err := client.Extensions().Deployments(testNamespace).Create(deployment)
-	require.NoError(t, err)
-
-	controller := NewController(client)
 	config := &armor.Armor{}
 
-	err = controller.UpdateDeployment(deployment, config)
-	require.NoError(t, err)
+	err = suite.controller.UpdateDeployment(deployment, config)
+	suite.Require().NoError(err)
 
-	deployment, err = client.Extensions().Deployments(testNamespace).Get("foo", metav1.GetOptions{})
-	require.NoError(t, err)
+	deployment, err = suite.client.Extensions().Deployments(testNamespace).Get("foo", metav1.GetOptions{})
+	suite.Require().NoError(err)
 
 	deploymentAnnotation := deployment.Annotations["armor.labstack.com/configHash"]
-	assert.Equal(t, getConfigHash(config), deploymentAnnotation)
+	suite.Assert().Equal(getConfigHash(config), deploymentAnnotation)
 
 	podAnnotation := deployment.Spec.Template.Annotations["armor.labstack.com/configHash"]
-	assert.Equal(t, getConfigHash(config), podAnnotation)
+	suite.Assert().Equal(getConfigHash(config), podAnnotation)
 }
 
-func TestUpdateDaemonSetByName(t *testing.T) {
+func (suite *Suite) TestUpdateDaemonSetByName() {
 	daemonSet := &extensions.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: testNamespace,
@@ -497,28 +524,25 @@ func TestUpdateDaemonSetByName(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset()
+	_, err := suite.client.Extensions().DaemonSets(testNamespace).Create(daemonSet)
+	suite.Require().NoError(err)
 
-	_, err := client.Extensions().DaemonSets(testNamespace).Create(daemonSet)
-	require.NoError(t, err)
-
-	controller := NewController(client)
 	config := &armor.Armor{}
 
-	daemonSet, err = controller.UpdateDaemonSetByName(testNamespace, "foo", config)
-	require.NoError(t, err)
+	daemonSet, err = suite.controller.UpdateDaemonSetByName(testNamespace, "foo", config)
+	suite.Require().NoError(err)
 
-	daemonSet, err = client.Extensions().DaemonSets(testNamespace).Get(daemonSet.Name, metav1.GetOptions{})
-	require.NoError(t, err)
+	daemonSet, err = suite.client.Extensions().DaemonSets(testNamespace).Get(daemonSet.Name, metav1.GetOptions{})
+	suite.Require().NoError(err)
 
 	daemonSetAnnotation := daemonSet.Annotations["armor.labstack.com/configHash"]
-	assert.Equal(t, getConfigHash(config), daemonSetAnnotation)
+	suite.Assert().Equal(getConfigHash(config), daemonSetAnnotation)
 
 	podAnnotation := daemonSet.Spec.Template.Annotations["armor.labstack.com/configHash"]
-	assert.Equal(t, getConfigHash(config), podAnnotation)
+	suite.Assert().Equal(getConfigHash(config), podAnnotation)
 }
 
-func TestUpdateDaemonSet(t *testing.T) {
+func (suite *Suite) TestUpdateDaemonSet() {
 	daemonSet := &extensions.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: testNamespace,
@@ -526,28 +550,25 @@ func TestUpdateDaemonSet(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset()
+	_, err := suite.client.Extensions().DaemonSets(testNamespace).Create(daemonSet)
+	suite.Require().NoError(err)
 
-	_, err := client.Extensions().DaemonSets(testNamespace).Create(daemonSet)
-	require.NoError(t, err)
-
-	controller := NewController(client)
 	config := &armor.Armor{}
 
-	daemonSet, err = controller.UpdateDaemonSet(daemonSet, config)
-	require.NoError(t, err)
+	daemonSet, err = suite.controller.UpdateDaemonSet(daemonSet, config)
+	suite.Require().NoError(err)
 
-	daemonSet, err = client.Extensions().DaemonSets(testNamespace).Get(daemonSet.Name, metav1.GetOptions{})
-	require.NoError(t, err)
+	daemonSet, err = suite.client.Extensions().DaemonSets(testNamespace).Get(daemonSet.Name, metav1.GetOptions{})
+	suite.Require().NoError(err)
 
 	daemonSetAnnotation := daemonSet.Annotations["armor.labstack.com/configHash"]
-	assert.Equal(t, getConfigHash(config), daemonSetAnnotation)
+	suite.Assert().Equal(getConfigHash(config), daemonSetAnnotation)
 
 	podAnnotation := daemonSet.Spec.Template.Annotations["armor.labstack.com/configHash"]
-	assert.Equal(t, getConfigHash(config), podAnnotation)
+	suite.Assert().Equal(getConfigHash(config), podAnnotation)
 }
 
-func TestGetNodeIPs(t *testing.T) {
+func (suite *Suite) TestGetNodeIPs() {
 	node := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "foo",
@@ -566,20 +587,16 @@ func TestGetNodeIPs(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset()
+	_, err := suite.client.Core().Nodes().Create(node)
+	suite.Require().NoError(err)
 
-	_, err := client.Core().Nodes().Create(node)
-	require.NoError(t, err)
+	nodeIPs, err := suite.controller.GetNodeIPs()
+	suite.Require().NoError(err)
 
-	controller := NewController(client)
-
-	nodeIPs, err := controller.GetNodeIPs()
-	require.NoError(t, err)
-
-	assert.Equal(t, []string{"54.10.11.12"}, nodeIPs)
+	suite.Assert().Equal([]string{"54.10.11.12"}, nodeIPs)
 }
 
-func TestGetNodeNamesByPodLabelSelector(t *testing.T) {
+func (suite *Suite) TestGetNodeNamesByPodLabelSelector() {
 	nodes := []*v1.Node{
 		{
 			ObjectMeta: metav1.ObjectMeta{
@@ -684,27 +701,23 @@ func TestGetNodeNamesByPodLabelSelector(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset()
-
 	for _, node := range nodes {
-		_, err := client.Core().Nodes().Create(node)
-		require.NoError(t, err)
+		_, err := suite.client.Core().Nodes().Create(node)
+		suite.Require().NoError(err)
 	}
 
 	for _, pod := range pods {
-		_, err := client.Core().Pods(pod.Namespace).Create(pod)
-		require.NoError(t, err)
+		_, err := suite.client.Core().Pods(pod.Namespace).Create(pod)
+		suite.Require().NoError(err)
 	}
 
-	controller := NewController(client)
+	nodeNames, err := suite.controller.GetNodeNamesByPodLabelSelector(testNamespace, labels.SelectorFromSet(labelSet))
+	suite.Require().NoError(err)
 
-	nodeNames, err := controller.GetNodeNamesByPodLabelSelector(testNamespace, labels.SelectorFromSet(labelSet))
-	require.NoError(t, err)
-
-	assert.Equal(t, []string{"foo"}, nodeNames)
+	suite.Assert().Equal([]string{"foo"}, nodeNames)
 }
 
-func TestGetExternalNodeIPsByNodeNames(t *testing.T) {
+func (suite *Suite) TestGetExternalNodeIPsByNodeNames() {
 	// should match but only external IP
 	node1 := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -739,23 +752,19 @@ func TestGetExternalNodeIPsByNodeNames(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset()
+	_, err := suite.client.Core().Nodes().Create(node1)
+	suite.Require().NoError(err)
 
-	_, err := client.Core().Nodes().Create(node1)
-	require.NoError(t, err)
+	_, err = suite.client.Core().Nodes().Create(node2)
+	suite.Require().NoError(err)
 
-	_, err = client.Core().Nodes().Create(node2)
-	require.NoError(t, err)
+	nodeIPs, err := suite.controller.GetExternalNodeIPsByNodeNames([]string{"foo", "qux"})
+	suite.Require().NoError(err)
 
-	controller := NewController(client)
-
-	nodeIPs, err := controller.GetExternalNodeIPsByNodeNames([]string{"foo", "qux"})
-	require.NoError(t, err)
-
-	assert.Equal(t, []string{"54.10.11.12"}, nodeIPs)
+	suite.Assert().Equal([]string{"54.10.11.12"}, nodeIPs)
 }
 
-func TestGetConfigHash(t *testing.T) {
+func (suite *Suite) TestGetConfigHash() {
 	config := &armor.Armor{
 		Hosts: map[string]*armor.Host{
 			"foo": {
@@ -773,11 +782,11 @@ func TestGetConfigHash(t *testing.T) {
 		},
 	}
 
-	assert.Equal(t, configHash, getConfigHash(config))
-	assert.NotEqual(t, configHash, getConfigHash(otherConfig))
+	suite.Assert().Equal(configHash, getConfigHash(config))
+	suite.Assert().NotEqual(configHash, getConfigHash(otherConfig))
 }
 
-func TestUpstreamServiceURL(t *testing.T) {
+func (suite *Suite) TestUpstreamServiceURL() {
 	for _, test := range []struct {
 		ip, port, want string
 	}{
@@ -785,36 +794,8 @@ func TestUpstreamServiceURL(t *testing.T) {
 		{"1.2.3.4", "8080", "http://1.2.3.4:8080"},
 	} {
 		got := upstreamServiceURL(test.ip, test.port)
-		assert.Equal(t, test.want, got)
+		suite.Assert().Equal(test.want, got)
 	}
-}
-
-func newTestController(t *testing.T, ingresses []*extensions.Ingress) (*Controller, kubernetes.Interface) {
-	client := fake.NewSimpleClientset()
-	controller := NewController(client)
-	seedIngresses(t, client, ingresses)
-	return controller, client
-}
-
-func seedIngresses(t *testing.T, client kubernetes.Interface, ingresses []*extensions.Ingress) {
-	for _, ingress := range ingresses {
-		_, err := client.Extensions().Ingresses(testNamespace).Create(ingress)
-		require.NoError(t, err)
-	}
-}
-
-// TODO(linki): make tests independent of ordering
-func assertIngresses(t *testing.T, ingresses []*extensions.Ingress, expected []map[string]string) {
-	require.Len(t, ingresses, len(expected))
-
-	for i := range ingresses {
-		assertIngress(t, ingresses[i], expected[i])
-	}
-}
-
-func assertIngress(t *testing.T, ingress *extensions.Ingress, expected map[string]string) {
-	assert.Equal(t, expected["name"], ingress.Name)
-	assert.Equal(t, expected["namespace"], ingress.Namespace)
 }
 
 // TODO(linki): make tests independent of ordering
